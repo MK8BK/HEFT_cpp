@@ -134,40 +134,39 @@ class Schedule{
 static void computeUprank(TaskSchedulingProblemConfig& tspc,
     vector<TDT>& uprank, unordered_set<NBT>& exitTasks,
     vector<vector<TDT>>& cmeans, vector<TDT>& Wmeans){
-  unordered_set<NBT> visited;
-  unordered_set<NBT> next;
+  unordered_set<NBT> computed;
+  unordered_set<NBT> predPool;
   for(NBT exitTask : exitTasks){
     uprank[exitTask] = Wmeans[exitTask];
-    visited.insert(exitTask);
+    computed.insert(exitTask);
     for(NBT task : tspc.predecessors[exitTask])
-      next.insert(task);
+      predPool.insert(task);
   }
-  auto nIt{next.begin()};
-  while(static_cast<NBT>(visited.size())!=tspc.v-1){
-    if(nIt==next.end()) break;
-    bool flag;
-    do{
-      flag = true;
-      for(NBT succ : tspc.successors[*nIt]){
-        if(uprank[succ]==-1){
-          flag = false; 
-          break;
+  auto canCompute = [&tspc, &computed](NBT task){
+    return all_of(tspc.successors[task].begin(), tspc.successors[task].end(), 
+        [&computed](NBT pred){
+          return computed.find(pred)!=computed.end();
         }
-      }
-      if(flag) break;
-      else nIt++;
-    }while(true);
-    NBT candidate{*nIt};
+        );
+  };
+
+  TDT maxBelow;
+  // compute uprank of all tasks
+  while(static_cast<NBT>(computed.size())<tspc.v){
+    // find next uprank computation candidate
+    auto It{predPool.begin()};
+    while(It!=predPool.end() && !canCompute(*It)) ++It;
+
+    // compute uprank of candidate
+    NBT candidate{*It};
     uprank[candidate] = Wmeans[candidate];
-    TDT maxBelow{-1};
-    for(NBT nj : tspc.successors[candidate]){
-      maxBelow = max(maxBelow, uprank[nj]+cmeans[candidate][nj]);
-    }
+    maxBelow = 0;
+    for(NBT succ : tspc.successors[candidate])
+      maxBelow = max(maxBelow, cmeans[candidate][succ]+uprank[succ]);
     uprank[candidate] += maxBelow;
-    visited.insert(candidate);
-    for(NBT pred : tspc.predecessors[candidate])
-      next.insert(pred);
-    next.erase(candidate);
+
+    computed.insert(candidate);
+    predPool.erase(It);
   }
 }
 
