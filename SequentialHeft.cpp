@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <cassert>
 #include <numeric>
 #include <unordered_set>
 #include <algorithm>
@@ -111,12 +112,13 @@ class Schedule{
     // number of available processors
     NBT q;
 
-    //
+    // processor id: start time, end time, task id
     vector<vector<tuple<TDT,TDT,NBT>>> schedule;
 
     // disable default constructor
     Schedule() = delete;
 
+    // constructor
     Schedule(NBT taskCount, NBT processorCount):
       v(taskCount), q(processorCount), schedule(processorCount,
           vector<tuple<TDT,TDT,NBT>>(0)){}
@@ -169,16 +171,26 @@ static void computeUprank(TaskSchedulingProblemConfig& tspc,
   }
 }
 
-// Schedule is not too costly to copy
 // I have no limitations
-Schedule HeftSolve(TaskSchedulingProblemConfig& tspc){
+void HeftSolve(TaskSchedulingProblemConfig& tspc, Schedule& sc){
+  assert((void(" invalid schedule input"),
+      (sc.v==tspc.v && sc.q==tspc.q)));
+
+  // compute the mean communication startup cost
   TDT Lmean{accumulate(tspc.L.begin(), tspc.L.end(), 0)/tspc.q};
+
+  // Wmeans[i] is the average execution time of task ni
   vector<TDT> Wmeans(tspc.v, 0);
   for(NBT ni{}; ni<tspc.v; ni++)
+    // TODO: review cache friendliness
     Wmeans[ni] = accumulate(tspc.W[ni].begin(), tspc.W[ni].end(), 0)/tspc.q;
+
+  // Bmeans is the average data transfer rate between processors
   DRT Bmean{};
   for(auto vect:tspc.B)
     Bmean+=accumulate(vect.begin(), vect.end(), 0)/(tspc.q * tspc.q);
+
+  // cmeans[i][j] is the average communication cost between task i and j
   vector<vector<TDT>> cmeans(tspc.v, vector<TDT>(tspc.v, 0));
   for(NBT ni{}; ni<tspc.v; ni++){
     for(NBT nk{}; nk<tspc.v; nk++){
@@ -187,18 +199,23 @@ Schedule HeftSolve(TaskSchedulingProblemConfig& tspc){
       cmeans[ni][nk] = Lmean + (tspc.data[ni][nk]/Bmean);
     }
   }
-  Schedule solution(tspc.v, tspc.q);
+
+  // EST[i][j] is the earliest execution start time of task i on processor j
   vector<vector<NBT>> EST(tspc.v,vector<NBT>(tspc.q, 0));
+
+  // EFT[i][j] is the earliest execution finish time of task i on processor j
   vector<vector<NBT>> EFT(tspc.v,vector<NBT>(tspc.q, 0));
-  // IDEA: replace by dynamic bitset to save memory
+
+  // compute the exit and entry tasks
   unordered_set<NBT> entryTasks, exitTasks;
   for(NBT ni{}; ni<tspc.v; ni++){
     if(tspc.predecessors[ni].size()==0) entryTasks.insert(ni);
     if(tspc.successors[ni].size()==0) exitTasks.insert(ni);
   }
+
+  // uprank[i] is the uprank of task i
   vector<TDT> uprank(tspc.v, -1);
   computeUprank(tspc, uprank, exitTasks, cmeans, Wmeans);
-  return solution;
 }
 
 } // namespace HEFT_CPP
