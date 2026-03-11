@@ -276,6 +276,11 @@ namespace HEFT_CPP {
         Schedule& solve() {
             vector<TDT> uprank(tspc->v, 0);
             computeUprank(uprank);
+            cout << "uprank values:\n";
+            for (NBT task = 0; task < tspc->v; ++task) {
+                cout << "task " << task + 1 << ": " << uprank[task] << '\n';
+            }
+            cout << '\n';
 
             // Order tasks by NONINCREASING rank_u.
             // If equal rank, smaller task id first (deterministic tie-break).
