@@ -209,10 +209,12 @@ namespace HEFT_CPP {
 
       // Bmeans is the average data transfer rate between processors
       DRT Bmean{};
-      for (auto vect: tspc->B)
-        Bmean += accumulate(vect.begin(), vect.end(), static_cast<DRT>(0));
-      Bmean /= tspc->q * tspc->q; // - tspc->q // ignore diagonal ?
-      // Bmean = max(Bmean, static_cast<DRT>(1));
+      if (tspc->q==static_cast<NBT>(0)) Bmean = 1;
+      else {
+        for (auto vect: tspc->B)
+          Bmean += accumulate(vect.begin(), vect.end(), static_cast<DRT>(0));
+        Bmean /= tspc->q * (tspc->q - 1);
+      }
 
       // cmeans[i][j] is the average communication cost between task i and j
       vector<vector<TDT> > cmeans(tspc->v, vector<TDT>(tspc->v, 0));
@@ -304,6 +306,8 @@ namespace HEFT_CPP {
       // uprank[i] is the uprank of task i
       vector<TDT> uprank(tspc->v, -1);
       computeUprank(uprank);
+      for (NBT i{}; i<tspc->v; ++i)
+        cout << i << ' ' << uprank[i] << endl;
 
       // sorting tasks in nonincreasing uprank order
       vector<pair<TDT, NBT> > uprankTaskNum(tspc->v, {0, 0});
@@ -348,25 +352,25 @@ namespace HEFT_CPP {
     TaskSchedulingProblemConfig tspc(v, q);
     NBT successorNum, succ;
     for (NBT task{}; task < v; ++task) {
-      cin >> successorNum;
+      in >> successorNum;
       tspc.successors.reserve(successorNum);
       for (NBT i{}; i < successorNum; ++i) {
-        cin >> succ;
+        in >> succ;
         tspc.successors[task].push_back(succ);
         tspc.predecessors[succ].push_back(task);
       }
     }
     for (NBT task1{}; task1 < v; ++task1)
       for (NBT task2{}; task2 < v; ++task2)
-        cin >> tspc.data[task1][task2];
+        in >> tspc.data[task1][task2];
     for (NBT processor1{}; processor1 < q; ++processor1)
       for (NBT processor2{}; processor2 < q; ++processor2)
-        cin >> tspc.B[processor1][processor2];
+        in >> tspc.B[processor1][processor2];
     for (NBT task{}; task < v; ++task)
       for (NBT processor{}; processor < q; ++processor)
-        cin >> tspc.W[task][processor];
+        in >> tspc.W[task][processor];
     for (NBT processor{}; processor < q; ++processor)
-      cin >> tspc.L[processor];
+      in >> tspc.L[processor];
     return tspc;
   }
 } // namespace HEFT_CPP
