@@ -1,0 +1,59 @@
+{
+    "graph_id": "graph_example",
+    "tasks": [
+      {
+        "id": "task1",
+        "duration": 10,
+        "memory": 512,
+        "dependencies": []
+      },
+      {
+        "id": "task2",
+        "duration": 15,
+        "memory": 1024,
+        "dependencies": ["task1"]
+      },
+      {
+        "id": "task3",
+        "duration": 5,
+        "memory": 256,
+        "dependencies": ["task1"]
+      },
+      {
+        "id": "task4",
+        "duration": 5,
+        "memory": 256,
+        "dependencies": ["task2"]
+      },
+      {
+        "id": "task5",
+        "duration": 15,
+        "memory": 256,
+        "dependencies": ["task1", "task4"]
+      },
+      {
+        "id": "task6",
+        "duration": 25,
+        "memory": 256,
+        "dependencies": ["task4"]
+      },
+      {
+        "id": "task7",
+        "duration": 7,
+        "memory": 256,
+        "dependencies": ["task1"]
+      },
+      {
+        "id": "task8",
+        "duration": 8,
+        "memory": 256,
+        "dependencies": ["task1"]
+      },
+      {
+        "id": "task9",
+        "duration": 9,
+        "memory": 256,
+        "dependencies": ["task1"]
+      }
+    ]
+  }
