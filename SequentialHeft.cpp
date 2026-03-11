@@ -363,5 +363,7 @@ namespace HEFT_CPP {
 int main() {
   using namespace HEFT_CPP;
   TaskSchedulingProblemConfig tspc{readTspc(cin)};
+  HeftAlgorithm heft(&tspc);
+  Schedule schedule {heft.solve()};
   return 0;
 }
