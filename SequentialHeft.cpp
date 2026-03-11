@@ -2,385 +2,371 @@
 #include <vector>
 #include <cstdint>
 #include <numeric>
-#include <unordered_set>
 #include <set>
 #include <algorithm>
 #include <limits>
 #include <tuple>
-#include <stack>
+#include <functional>
+
 using namespace std;
 
 namespace HEFT_CPP {
-  // numeric base type used throughout
-  // possibly replace by `unsigned long long` later
-  using NBT = int64_t;
 
-  // time duration type, should be floating point number
-  using TDT = long double;
+    using NBT = int64_t;      // integer index / count type
+    using TDT = long double;  // time duration type
+    using DST = long double;  // data size type
+    using DRT = long double;  // data rate type
 
-  // data size type
-  using DST = long double;
+    class TaskSchedulingProblemConfig {
+    public:
+        const NBT v; // number of tasks
+        const NBT q; // number of processors
 
-  // data transfer rate type
-  using DRT = long double;
+        vector<vector<NBT>> successors;
+        vector<vector<NBT>> predecessors;
 
-  // Assuming a sparse DAG, this is an appropriate representation
-  class TaskSchedulingProblemConfig {
-  public:
-    // Each node has an ID in [0, v[
-    const NBT v;
+        // data[i][j] = amount of data sent from task i to task j
+        vector<vector<DST>> data;
 
-    // number of processors to accomplish tasks
-    const NBT q;
+        // B[p][r] = transfer rate from processor p to processor r
+        vector<vector<DRT>> B;
 
-    // The successors and predecessors are accessible in O(1)
-    vector<vector<NBT> > successors;
-    vector<vector<NBT> > predecessors;
+        // W[i][p] = execution time of task i on processor p
+        vector<vector<TDT>> W;
 
-    // matrix of communication data
-    // possibly replace by c-style array later
-    vector<vector<DST> > data;
+        // L[p] = communication startup cost of processor p
+        vector<TDT> L;
 
-    // matrix of data transfer rates between processors
-    vector<vector<DRT> > B;
+        TaskSchedulingProblemConfig() = delete;
 
-    // execution time of jobs on processors
-    vector<vector<TDT> > W;
+        TaskSchedulingProblemConfig(NBT taskCount, NBT processorCount)
+            : v(taskCount),
+              q(processorCount),
+              successors(taskCount),
+              predecessors(taskCount),
+              data(taskCount, vector<DST>(taskCount, 0)),
+              B(processorCount, vector<DRT>(processorCount, 0)),
+              W(taskCount, vector<TDT>(processorCount, 0)),
+              L(processorCount, 0) {}
 
-    // communication startup cost of processors
-    vector<TDT> L;
-
-
-    // disable the default constructor
-    TaskSchedulingProblemConfig();
-
-    // the only allowed constructor
-    TaskSchedulingProblemConfig(const NBT taskCount, const NBT processorCount) : v(taskCount), q(processorCount),
-                                                                     successors(taskCount, vector<NBT>(0)),
-                                                                     predecessors(taskCount, vector<NBT>(0)),
-                                                                     data(taskCount, vector<DST>(taskCount, 0)),
-                                                                     B(processorCount,
-                                                                       vector<DRT>(processorCount, 0)),
-                                                                     W(taskCount, vector<TDT>(processorCount, 0)),
-                                                                     L(processorCount, 0) {
-    }
-
-    // destructor, change if using dynamic c-style array
-    ~TaskSchedulingProblemConfig() = default;
-
-    // add an edge to the dag
-    void addEdge(const NBT sourceJob, const NBT destJob) {
-      if (sourceJob < v && destJob < v) [[likely]]
-          successors[sourceJob].push_back(destJob),
-          predecessors[destJob].push_back(sourceJob);
-    }
-
-    // set the data transfer requirement between job source and dest
-    // default is 0
-    void setDataTransferRequirement(const NBT sourceJob, const NBT destJob,
-                                           const DST transferReq) {
-      if (sourceJob < v && destJob < v) [[likely]]
-          data[sourceJob][destJob] = transferReq;
-    }
-
-    // set the data transfer rate between processor source and dest
-    // default is 0
-    void setDataTransferRate(const NBT sourceProcessor, const NBT destProcessor,
-                                    const DRT transferRate) {
-      if (sourceProcessor < q && destProcessor < q) [[likely]]
-          B[sourceProcessor][destProcessor] = transferRate;
-    }
-
-    // set the execution time of a task on a particular processor
-    void setExecutionTime(const NBT task, const NBT processor, const TDT time) {
-      if (task < v && processor < q) [[likely]]
-          W[task][processor] = time;
-    }
-
-    // set the communication startup cost of the processor `processor`
-    void setCommunicationStartupCost(const NBT processor, const TDT commStartCost) {
-      if (processor < q) [[likely]]
-          L[processor] = commStartCost;
-    }
-  };
-
-  struct schedComp {
-    bool operator()(const tuple<NBT, TDT, TDT>& t1, const tuple<NBT, TDT, TDT>& t2) const
-    {return get<1>(t1)<get<1>(t2);}
-  };
-
-  // class to represent the final schedule
-  class Schedule {
-  public:
-    // number of jobs/tasks
-    NBT v;
-
-    // number of available processors
-    NBT q;
-
-    // task id: processor id, start time, end time
-    vector<tuple<NBT, TDT, TDT> > taskSchedule;
-
-
-    // processor id: ordered_set of {task id , start time, end time}
-    vector<set<tuple<NBT, TDT, TDT>, schedComp>> _processorSchedule;
-
-    vector<bool> scheduled;
-
-    // disable default constructor
-    Schedule() = delete;
-
-    // constructor
-    Schedule(const NBT taskCount, const NBT processorCount) : v(taskCount), q(processorCount),
-                                                  taskSchedule(taskCount), _processorSchedule(processorCount),
-                                                  scheduled(taskCount, false) {
-    }
-
-    // schedule a task to run on a specified processor
-    void scheduleTask(NBT task, NBT processor, TDT startTime,
-                             TDT endTime) {
-      if (task < v && processor < q && startTime <= endTime) [[likely]]{
-        _processorSchedule[processor].insert({task, startTime, endTime});
-        taskSchedule[task] = {processor, startTime, endTime};
-        scheduled[task] = true;
-      }
-    }
-  };
-
-  ostream& operator<<(ostream& os, const Schedule& sc) {
-    //for (size_t i{}; i<sc.taskSchedule.size(); ++i) {
-    //  auto [processor, start, end] = sc.taskSchedule[i];
-    //  os << '[' << i+1 << ":[" << start << ',' << end << ',' << processor << "]] " << '\n';
-    //}
-    for (NBT processor{}; processor<sc.q; ++processor) {
-      for (auto [t, s, e] : sc._processorSchedule[processor])
-        os << '[' << t+1 << ":[" << s << ',' << e << "]] ";
-      if (processor<sc.q-1)[[likely]]
-        os << '\n';
-    }
-    return os;
-  }
-
-  /**
-   * deprecate soon
-   * @param tspc /
-   * @param t1
-   * @param t2
-   * @return true if t2 depends on t1 (using dfs)
-   */
-  bool taskPrecedes(const TaskSchedulingProblemConfig &tspc, const NBT t1, const NBT t2) {
-    vector<bool> visited;
-    stack<NBT> s;
-    s.push(t1);
-    while (s.size() != static_cast<size_t>(0)) {
-      const NBT candidate{s.top()};
-      if (candidate == t2) return true;
-      s.pop();
-      if (visited[candidate]) continue;
-      for (NBT succ: tspc.successors[candidate]) {
-        if (succ == t2) return true;
-        if (!visited[succ])
-          s.push(succ);
-      }
-    }
-    return false;
-  }
-
-
-  class HeftAlgorithm {
-  public:
-    explicit HeftAlgorithm(TaskSchedulingProblemConfig *tspcp) : tspc(tspcp),
-                                                                 sch(tspcp->v, tspcp->q) {
-    }
-
-    TaskSchedulingProblemConfig *tspc;
-    Schedule sch;
-
-    void computeUprank(vector<TDT> &uprank) const {
-      // compute the mean communication startup cost
-      const TDT Lmean{accumulate(tspc->L.begin(), tspc->L.end(), static_cast<TDT>(0)) / tspc->q};
-
-      // Wmeans[i] is the average execution time of task ni
-      vector<TDT> Wmeans(tspc->v, 0);
-      for (NBT ni{}; ni < tspc->v; ni++)
-        // TODO: review cache friendliness
-          Wmeans[ni] = accumulate(tspc->W[ni].begin(), tspc->W[ni].end(), static_cast<TDT>(0)) / tspc->q;
-
-      // Bmeans is the average data transfer rate between processors
-      DRT Bmean{};
-      for (auto vect: tspc->B)
-        Bmean += accumulate(vect.begin(), vect.end(), 0.0l) / (tspc->q * tspc->q - tspc->q);
-
-      // cmeans[i][j] is the average communication cost between task i and j
-      vector<vector<TDT>> cmeans(tspc->v, vector<TDT>(tspc->v, 0));
-      for (NBT ni{}; ni < tspc->v; ni++) {
-        for (NBT nk{}; nk < tspc->v; nk++) {
-          if (ni == nk)[[unlikely]]
-              continue;
-          cmeans[ni][nk] = Lmean + tspc->data[ni][nk]/Bmean;
+        void addEdge(NBT sourceJob, NBT destJob) {
+            if (0 <= sourceJob && sourceJob < v &&
+                0 <= destJob   && destJob   < v) {
+                successors[sourceJob].push_back(destJob);
+                predecessors[destJob].push_back(sourceJob);
+            }
         }
-      }
 
-      unordered_set<NBT> exitTasks;
-      for (NBT ni{}; ni < tspc->v; ni++) {
-        if (tspc->successors[ni].empty()) exitTasks.insert(ni);
-      }
-
-      vector<bool> computed(tspc->v, false);
-      unordered_set<NBT> predPool;
-      for (const NBT exitTask: exitTasks) {
-        uprank[exitTask] = Wmeans[exitTask];
-        computed[exitTask] = true;
-        for (NBT task: tspc->predecessors[exitTask])
-          predPool.insert(task);
-      }
-      auto canCompute = [this, &computed](const NBT task) {
-        return all_of(tspc->successors[task].begin(), tspc->successors[task].end(),
-                      [&computed](const NBT pred) {
-                        return computed[pred];
-                      }
-        );
-      };
-      // compute uprank of all tasks
-      while (static_cast<NBT>(computed.size()) < tspc->v) {
-        // find next uprank computation candidate
-        auto It{predPool.begin()};
-        while (It != predPool.end() && !canCompute(*It)) ++It;
-
-        // compute uprank of candidate
-        const NBT candidate{*It};
-        uprank[candidate] = 0;
-        for (const NBT succ: tspc->successors[candidate]) {
-          uprank[candidate] = max(uprank[candidate], cmeans[candidate][succ] + uprank[succ]);
+        void setDataTransferRequirement(NBT sourceJob, NBT destJob, DST transferReq) {
+            if (0 <= sourceJob && sourceJob < v &&
+                0 <= destJob   && destJob   < v) {
+                data[sourceJob][destJob] = transferReq;
+            }
         }
-        for (NBT pred : tspc->predecessors[candidate])
-          if (predPool.find(pred)==predPool.end() && !computed[pred])
-            predPool.insert(pred);
-        uprank[candidate] += Wmeans[candidate];
-        computed[candidate] = true;
-        predPool.erase(It);
-      }
-    }
 
-    TDT computeEST(NBT task, NBT processor) {
-      TDT tmpEst{};
-      for (const NBT pred: tspc->predecessors[task]) {
-        auto [predProcessor, predStart, predEnd] = sch.taskSchedule[pred];
-        if (predProcessor!=processor)[[likely]]
-          tmpEst = max(tmpEst, predEnd + tspc->L[predProcessor]
-                             + tspc->data[pred][task] / tspc->B[predProcessor][processor]);
-        else[[unlikely]]
-          tmpEst = max(tmpEst, predEnd);
-      }
-      if (sch._processorSchedule[processor].empty() || get<2>(*sch._processorSchedule[processor].rbegin())<tmpEst)
-        return tmpEst;
-      auto prevIt{sch._processorSchedule[processor].begin()};
-      auto it{prevIt};
-      ++it;
-      if (sch._processorSchedule[processor].end()==it) {
-        // only one element scheduled on processor
-        return max(tmpEst, get<2>(*prevIt));
-      }
-      while(it!=sch._processorSchedule[processor].end() && get<1>(*it)<tmpEst+tspc->W[task][processor])
-        ++prevIt, ++it;
-      if (it==sch._processorSchedule[processor].end())
-        return max(tmpEst, get<2>(*prevIt));
-      TDT gap;
-      while (it!=sch._processorSchedule[processor].end()) {
-        gap = get<1>(*it)-get<2>(*prevIt);
-        if(gap>0 && get<2>(*prevIt)>=tmpEst && gap>=tmpEst+tspc->W[task][processor]) {
-          return get<2>(*prevIt);
+        void setDataTransferRate(NBT sourceProcessor, NBT destProcessor, DRT transferRate) {
+            if (0 <= sourceProcessor && sourceProcessor < q &&
+                0 <= destProcessor   && destProcessor   < q) {
+                B[sourceProcessor][destProcessor] = transferRate;
+            }
         }
-        ++prevIt, ++it;
-      }
-      return max(tmpEst, get<2>(*prevIt));
-    }
 
-
-
-    Schedule &solve() {
-      // uprank[i] is the uprank of task i
-      vector<TDT> uprank(tspc->v, -1);
-      computeUprank(uprank);
-
-      // EST[i][j] is the earliest execution start time of task i on processor j
-      // vector<vector<TDT> > EST(tspc->v, vector<TDT>(tspc->q, 0));
-
-      // EFT[i][j] is the earliest execution finish time of task i on processor j
-      // vector<vector<TDT> > EFT(tspc->v, vector<TDT>(tspc->q, 0));
-
-      // sorting tasks in nonincreasing uprank order
-      vector<pair<TDT, NBT> > uprankTaskNum(tspc->v, {0, 0});
-      for (NBT task{}; task < tspc->v; ++task)
-        uprankTaskNum[task] = {uprank[task], task};
-      sort(uprankTaskNum.begin(), uprankTaskNum.end());
-
-      TDT bestEFT{}, currentEFT{}, currentEST{}, bestEST{};
-      NBT bestProcessor{};
-      for (NBT i{}; i < tspc->v; ++i) {
-        const NBT task{uprankTaskNum[i].second};
-        bestEFT = numeric_limits<TDT>::max();
-        for (NBT processor{}; processor < tspc->q; ++processor) {
-          // compute EST using insertion based scheduling policy
-          currentEST = computeEST(task, processor);
-          // compute EFT[task][processor]
-          currentEFT = currentEST + tspc->W[task][processor];
-          if (bestEFT > currentEFT)
-            bestEFT = currentEFT,
-            bestProcessor = processor,
-            bestEST = currentEST;
+        void setExecutionTime(NBT task, NBT processor, TDT time) {
+            if (0 <= task      && task      < v &&
+                0 <= processor && processor < q) {
+                W[task][processor] = time;
+            }
         }
-        sch.scheduleTask(task, bestProcessor, bestEST, bestEFT);
-      }
-      return sch;
-    }
-  };
 
-  /**
-   * Function to read a tspc, the format is specified here, in order, read:
-   * - two integers representing the number of tasks and the number of processors
-   * - v lines are read, each one starts with the number of task successors
-   * then the ids of said successors
-   * - then vxv matrix data is read, the data transfer sizes between tasks
-   * - then qxq matrix B is read, the data transfer rate between processors
-   * - then vxq matrix W is read, the execution time of tasks on processors
-   * - then q number form the vector L, the communication startup costs of processors
-  */
-  TaskSchedulingProblemConfig readTspc(istream &in) {
-    NBT v, q;
-    in >> v >> q;
-    TaskSchedulingProblemConfig tspc(v, q);
-    NBT successorNum, succ;
-    for (NBT task{}; task < v; ++task) {
-      cin >> successorNum;
-      tspc.successors.reserve(successorNum);
-      for (NBT i{}; i < successorNum; ++i) {
-        cin >> succ;
-        tspc.successors[task].push_back(succ);
-        tspc.predecessors[succ].push_back(task);
-      }
+        void setCommunicationStartupCost(NBT processor, TDT commStartCost) {
+            if (0 <= processor && processor < q) {
+                L[processor] = commStartCost;
+            }
+        }
+    };
+
+    struct SchedComp {
+        bool operator()(const tuple<NBT, TDT, TDT>& a,
+                        const tuple<NBT, TDT, TDT>& b) const {
+            if (get<1>(a) != get<1>(b)) return get<1>(a) < get<1>(b); // start time
+            if (get<2>(a) != get<2>(b)) return get<2>(a) < get<2>(b); // end time
+            return get<0>(a) < get<0>(b);                             // task id
+        }
+    };
+
+    class Schedule {
+    public:
+        NBT v;
+        NBT q;
+
+        // taskSchedule[task] = {processor, start, end}
+        vector<tuple<NBT, TDT, TDT>> taskSchedule;
+
+        // for each processor: ordered set of {task, start, end}
+        vector<set<tuple<NBT, TDT, TDT>, SchedComp>> processorSchedule;
+
+        vector<bool> scheduled;
+
+        Schedule() = delete;
+
+        Schedule(NBT taskCount, NBT processorCount)
+            : v(taskCount),
+              q(processorCount),
+              taskSchedule(taskCount, {-1, 0, 0}),
+              processorSchedule(processorCount),
+              scheduled(taskCount, false) {}
+
+        void scheduleTask(NBT task, NBT processor, TDT startTime, TDT endTime) {
+            if (0 <= task      && task      < v &&
+                0 <= processor && processor < q &&
+                startTime <= endTime) {
+                processorSchedule[processor].insert({task, startTime, endTime});
+                taskSchedule[task] = {processor, startTime, endTime};
+                scheduled[task] = true;
+            }
+        }
+    };
+
+    ostream& operator<<(ostream& os, const Schedule& sc) {
+        for (NBT processor = 0; processor < sc.q; ++processor) {
+            for (const auto& [task, start, end] : sc.processorSchedule[processor]) {
+                os << '[' << task + 1 << ":[" << start << ',' << end << "]] ";
+            }
+            if (processor + 1 < sc.q) {
+                os << '\n';
+            }
+        }
+        return os;
     }
-    for (NBT task1{}; task1 < v; ++task1)
-      for (NBT task2{}; task2 < v; ++task2)
-        cin >> tspc.data[task1][task2];
-    for (NBT processor1{}; processor1 < q; ++processor1)
-      for (NBT processor2{}; processor2 < q; ++processor2)
-        cin >> tspc.B[processor1][processor2];
-    for (NBT task{}; task < v; ++task)
-      for (NBT processor{}; processor < q; ++processor)
-        cin >> tspc.W[task][processor];
-    for (NBT processor{}; processor < q; ++processor)
-      cin >> tspc.L[processor];
-    return tspc;
-  }
+
+    class HeftAlgorithm {
+    public:
+        explicit HeftAlgorithm(TaskSchedulingProblemConfig* tspcp)
+            : tspc(tspcp), sch(tspcp->v, tspcp->q) {}
+
+        TaskSchedulingProblemConfig* tspc;
+        Schedule sch;
+
+        TDT meanComputationCost(NBT task) const {
+            TDT sum = accumulate(tspc->W[task].begin(), tspc->W[task].end(), static_cast<TDT>(0));
+            return sum / static_cast<TDT>(tspc->q);
+        }
+
+        TDT meanStartupCost() const {
+            TDT sum = accumulate(tspc->L.begin(), tspc->L.end(), static_cast<TDT>(0));
+            return sum / static_cast<TDT>(tspc->q);
+        }
+
+        TDT meanTransferRate() const {
+            if (tspc->q <= 1) {
+                return 1; // avoid division by zero in degenerate case
+            }
+
+            TDT sum = 0;
+            NBT count = 0;
+
+            for (NBT p = 0; p < tspc->q; ++p) {
+                for (NBT r = 0; r < tspc->q; ++r) {
+                    if (p == r) continue;
+                    sum += tspc->B[p][r];
+                    ++count;
+                }
+            }
+
+            if (count == 0) return 1;
+            return sum / static_cast<TDT>(count);
+        }
+
+        TDT meanCommunicationCost(NBT fromTask, NBT toTask, TDT Lmean, TDT Bmean) const {
+            if (fromTask == toTask) return 0;
+            if (Bmean == 0) {
+                return numeric_limits<TDT>::infinity();
+            }
+            return Lmean + tspc->data[fromTask][toTask] / Bmean;
+        }
+
+        void computeUprank(vector<TDT>& uprank) const {
+            const TDT Lmean = meanStartupCost();
+            const TDT Bmean = meanTransferRate();
+
+            vector<bool> done(tspc->v, false);
+
+            function<TDT(NBT)> dfs = [&](NBT task) -> TDT {
+                if (done[task]) {
+                    return uprank[task];
+                }
+
+                TDT wbar = meanComputationCost(task);
+
+                if (tspc->successors[task].empty()) {
+                    uprank[task] = wbar;
+                    done[task] = true;
+                    return uprank[task];
+                }
+
+                TDT bestSucc = 0;
+                for (NBT succ : tspc->successors[task]) {
+                    TDT cbar = meanCommunicationCost(task, succ, Lmean, Bmean);
+                    bestSucc = max(bestSucc, cbar + dfs(succ));
+                }
+
+                uprank[task] = wbar + bestSucc;
+                done[task] = true;
+                return uprank[task];
+            };
+
+            for (NBT task = 0; task < tspc->v; ++task) {
+                dfs(task);
+            }
+        }
+
+        TDT communicationCost(NBT predTask, NBT task, NBT predProcessor, NBT processor) const {
+            if (predProcessor == processor) {
+                return 0;
+            }
+
+            DRT rate = tspc->B[predProcessor][processor];
+            if (rate == 0) {
+                return numeric_limits<TDT>::infinity();
+            }
+
+            return tspc->L[predProcessor] + tspc->data[predTask][task] / rate;
+        }
+
+        TDT computeReadyTime(NBT task, NBT processor) const {
+            TDT ready = 0;
+
+            for (NBT pred : tspc->predecessors[task]) {
+                auto [predProcessor, predStart, predEnd] = sch.taskSchedule[pred];
+
+                // In HEFT this should already be scheduled because of the rank order.
+                if (predProcessor < 0) {
+                    return numeric_limits<TDT>::infinity();
+                }
+
+                ready = max(
+                    ready,
+                    predEnd + communicationCost(pred, task, predProcessor, processor)
+                );
+            }
+
+            return ready;
+        }
+
+        TDT computeEST(NBT task, NBT processor) const {
+            TDT ready = computeReadyTime(task, processor);
+            TDT duration = tspc->W[task][processor];
+
+            // Start from the data-ready time.
+            TDT start = ready;
+
+            // Scan the already occupied intervals on this processor.
+            // If we find a large enough hole, place the task there.
+            for (const auto& [otherTask, s, e] : sch.processorSchedule[processor]) {
+                if (start + duration <= s) {
+                    return start; // fits before this existing task
+                }
+                start = max(start, e); // otherwise move start to after this task
+            }
+
+            // If no gap was large enough, place it after the last scheduled task.
+            return start;
+        }
+
+        Schedule& solve() {
+            vector<TDT> uprank(tspc->v, 0);
+            computeUprank(uprank);
+
+            // Order tasks by NONINCREASING rank_u.
+            // If equal rank, smaller task id first (deterministic tie-break).
+            vector<NBT> order(tspc->v);
+            for (NBT i = 0; i < tspc->v; ++i) {
+                order[i] = i;
+            }
+
+            sort(order.begin(), order.end(),
+                 [&](NBT a, NBT b) {
+                     if (uprank[a] != uprank[b]) return uprank[a] > uprank[b];
+                     return a < b;
+                 });
+
+            for (NBT task : order) {
+                TDT bestEST = 0;
+                TDT bestEFT = numeric_limits<TDT>::infinity();
+                NBT bestProcessor = -1;
+
+                for (NBT processor = 0; processor < tspc->q; ++processor) {
+                    TDT est = computeEST(task, processor);
+                    TDT eft = est + tspc->W[task][processor];
+
+                    if (eft < bestEFT) {
+                        bestEFT = eft;
+                        bestEST = est;
+                        bestProcessor = processor;
+                    }
+                }
+
+                sch.scheduleTask(task, bestProcessor, bestEST, bestEFT);
+            }
+
+            return sch;
+        }
+    };
+
+    TaskSchedulingProblemConfig readTspc(istream& in) {
+        NBT v, q;
+        in >> v >> q;
+
+        TaskSchedulingProblemConfig tspc(v, q);
+
+        for (NBT task = 0; task < v; ++task) {
+            NBT successorNum;
+            in >> successorNum;
+
+            tspc.successors[task].reserve(successorNum);
+
+            for (NBT i = 0; i < successorNum; ++i) {
+                NBT succ;
+                in >> succ;
+                tspc.successors[task].push_back(succ);
+                tspc.predecessors[succ].push_back(task);
+            }
+        }
+
+        for (NBT task1 = 0; task1 < v; ++task1) {
+            for (NBT task2 = 0; task2 < v; ++task2) {
+                in >> tspc.data[task1][task2];
+            }
+        }
+
+        for (NBT processor1 = 0; processor1 < q; ++processor1) {
+            for (NBT processor2 = 0; processor2 < q; ++processor2) {
+                in >> tspc.B[processor1][processor2];
+            }
+        }
+
+        for (NBT task = 0; task < v; ++task) {
+            for (NBT processor = 0; processor < q; ++processor) {
+                in >> tspc.W[task][processor];
+            }
+        }
+
+        for (NBT processor = 0; processor < q; ++processor) {
+            in >> tspc.L[processor];
+        }
+
+        return tspc;
+    }
 
 } // namespace HEFT_CPP
 
 int main() {
-  using namespace HEFT_CPP;
-  TaskSchedulingProblemConfig tspc{readTspc(cin)};
-  HeftAlgorithm heft(&tspc);
-  Schedule schedule {heft.solve()};
-  cout << schedule << endl;
-  return 0;
+    using namespace HEFT_CPP;
+
+    TaskSchedulingProblemConfig tspc = readTspc(cin);
+    HeftAlgorithm heft(&tspc);
+    Schedule schedule = heft.solve();
+
+    cout << schedule << '\n';
+    return 0;
 }
