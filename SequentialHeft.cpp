@@ -306,8 +306,6 @@ namespace HEFT_CPP {
       // uprank[i] is the uprank of task i
       vector<TDT> uprank(tspc->v, -1);
       computeUprank(uprank);
-      for (NBT i{}; i<tspc->v; ++i)
-        cout << i << ' ' << uprank[i] << endl;
 
       // sorting tasks in nonincreasing uprank order
       vector<pair<TDT, NBT> > uprankTaskNum(tspc->v, {0, 0});
