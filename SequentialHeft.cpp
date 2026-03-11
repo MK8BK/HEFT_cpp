@@ -56,13 +56,13 @@ namespace HEFT_CPP {
 
     // the only allowed constructor
     TaskSchedulingProblemConfig(const NBT taskCount, const NBT processorCount) : v(taskCount), q(processorCount),
-                                                                     successors(taskCount, vector<NBT>(0)),
-                                                                     predecessors(taskCount, vector<NBT>(0)),
-                                                                     data(taskCount, vector<DST>(taskCount, 0)),
-                                                                     B(processorCount,
-                                                                       vector<DRT>(processorCount, 0)),
-                                                                     W(taskCount, vector<TDT>(processorCount, 0)),
-                                                                     L(processorCount, 0) {
+      successors(taskCount, vector<NBT>(0)),
+      predecessors(taskCount, vector<NBT>(0)),
+      data(taskCount, vector<DST>(taskCount, 0)),
+      B(processorCount,
+        vector<DRT>(processorCount, 0)),
+      W(taskCount, vector<TDT>(processorCount, 0)),
+      L(processorCount, 0) {
     }
 
     // destructor, change if using dynamic c-style array
@@ -78,7 +78,7 @@ namespace HEFT_CPP {
     // set the data transfer requirement between job source and dest
     // default is 0
     void setDataTransferRequirement(const NBT sourceJob, const NBT destJob,
-                                           const DST transferReq) {
+                                    const DST transferReq) {
       if (sourceJob < v && destJob < v) [[likely]]
           data[sourceJob][destJob] = transferReq;
     }
@@ -86,7 +86,7 @@ namespace HEFT_CPP {
     // set the data transfer rate between processor source and dest
     // default is 0
     void setDataTransferRate(const NBT sourceProcessor, const NBT destProcessor,
-                                    const DRT transferRate) {
+                             const DRT transferRate) {
       if (sourceProcessor < q && destProcessor < q) [[likely]]
           B[sourceProcessor][destProcessor] = transferRate;
     }
@@ -105,8 +105,9 @@ namespace HEFT_CPP {
   };
 
   struct schedComp {
-    bool operator()(const tuple<NBT, TDT, TDT>& t1, const tuple<NBT, TDT, TDT>& t2) const
-    {return get<1>(t1)<get<1>(t2);}
+    bool operator()(const tuple<NBT, TDT, TDT> &t1, const tuple<NBT, TDT, TDT> &t2) const {
+      return get<1>(t1) < get<1>(t2);
+    }
   };
 
   // class to represent the final schedule
@@ -123,7 +124,7 @@ namespace HEFT_CPP {
 
 
     // processor id: ordered_set of {task id , start time, end time}
-    vector<set<tuple<NBT, TDT, TDT>, schedComp>> _processorSchedule;
+    vector<set<tuple<NBT, TDT, TDT>, schedComp> > _processorSchedule;
 
     vector<bool> scheduled;
 
@@ -132,13 +133,14 @@ namespace HEFT_CPP {
 
     // constructor
     Schedule(const NBT taskCount, const NBT processorCount) : v(taskCount), q(processorCount),
-                                                  taskSchedule(taskCount), _processorSchedule(processorCount),
-                                                  scheduled(taskCount, false) {
+                                                              taskSchedule(taskCount),
+                                                              _processorSchedule(processorCount),
+                                                              scheduled(taskCount, false) {
     }
 
     // schedule a task to run on a specified processor
     void scheduleTask(NBT task, NBT processor, TDT startTime,
-                             TDT endTime) {
+                      TDT endTime) {
       if (task < v && processor < q && startTime <= endTime) [[likely]]{
         _processorSchedule[processor].insert({task, startTime, endTime});
         taskSchedule[task] = {processor, startTime, endTime};
@@ -147,16 +149,16 @@ namespace HEFT_CPP {
     }
   };
 
-  ostream& operator<<(ostream& os, const Schedule& sc) {
+  ostream &operator<<(ostream &os, const Schedule &sc) {
     //for (size_t i{}; i<sc.taskSchedule.size(); ++i) {
     //  auto [processor, start, end] = sc.taskSchedule[i];
     //  os << '[' << i+1 << ":[" << start << ',' << end << ',' << processor << "]] " << '\n';
     //}
-    for (NBT processor{}; processor<sc.q; ++processor) {
-      for (auto [t, s, e] : sc._processorSchedule[processor])
-        os << '[' << t+1 << ":[" << s << ',' << e << "]] ";
-      if (processor<sc.q-1)[[likely]]
-        os << '\n';
+    for (NBT processor{}; processor < sc.q; ++processor) {
+      for (auto [t, s, e]: sc._processorSchedule[processor])
+        os << '[' << t + 1 << ":[" << s << ',' << e << "]] ";
+      if (processor < sc.q - 1)[[likely]]
+          os << '\n';
     }
     return os;
   }
@@ -203,21 +205,22 @@ namespace HEFT_CPP {
       // Wmeans[i] is the average execution time of task ni
       vector<TDT> Wmeans(tspc->v, 0);
       for (NBT ni{}; ni < tspc->v; ni++)
-        // TODO: review cache friendliness
-          Wmeans[ni] = accumulate(tspc->W[ni].begin(), tspc->W[ni].end(), static_cast<TDT>(0)) / tspc->q;
+        Wmeans[ni] = accumulate(tspc->W[ni].begin(), tspc->W[ni].end(), static_cast<TDT>(0)) / tspc->q;
 
       // Bmeans is the average data transfer rate between processors
       DRT Bmean{};
       for (auto vect: tspc->B)
-        Bmean += accumulate(vect.begin(), vect.end(), 0.0l) / (tspc->q * tspc->q - tspc->q);
+        Bmean += accumulate(vect.begin(), vect.end(), static_cast<DRT>(0));
+      Bmean /= tspc->q * tspc->q; // - tspc->q // ignore diagonal ?
+      // Bmean = max(Bmean, static_cast<DRT>(1));
 
       // cmeans[i][j] is the average communication cost between task i and j
-      vector<vector<TDT>> cmeans(tspc->v, vector<TDT>(tspc->v, 0));
+      vector<vector<TDT> > cmeans(tspc->v, vector<TDT>(tspc->v, 0));
       for (NBT ni{}; ni < tspc->v; ni++) {
         for (NBT nk{}; nk < tspc->v; nk++) {
           if (ni == nk)[[unlikely]]
               continue;
-          cmeans[ni][nk] = Lmean + tspc->data[ni][nk]/Bmean;
+          cmeans[ni][nk] = Lmean + tspc->data[ni][nk] / Bmean;
         }
       }
 
@@ -234,7 +237,7 @@ namespace HEFT_CPP {
         for (NBT task: tspc->predecessors[exitTask])
           predPool.insert(task);
       }
-      auto canCompute = [this, &computed](const NBT task) {
+      auto canCompute = [&computed, this](const NBT task) {
         return all_of(tspc->successors[task].begin(), tspc->successors[task].end(),
                       [&computed](const NBT pred) {
                         return computed[pred];
@@ -242,23 +245,23 @@ namespace HEFT_CPP {
         );
       };
       // compute uprank of all tasks
-      while (static_cast<NBT>(computed.size()) < tspc->v) {
+      while (!predPool.empty()) {
         // find next uprank computation candidate
-        auto It{predPool.begin()};
-        while (It != predPool.end() && !canCompute(*It)) ++It;
+        auto it{predPool.begin()};
+        while (it != predPool.end() && !canCompute(*it)) ++it;
 
         // compute uprank of candidate
-        const NBT candidate{*It};
+        const NBT candidate{*it};
         uprank[candidate] = 0;
         for (const NBT succ: tspc->successors[candidate]) {
           uprank[candidate] = max(uprank[candidate], cmeans[candidate][succ] + uprank[succ]);
         }
-        for (NBT pred : tspc->predecessors[candidate])
-          if (predPool.find(pred)==predPool.end() && !computed[pred])
+        for (NBT pred: tspc->predecessors[candidate])
+          if (predPool.find(pred) == predPool.end() && !computed[pred])
             predPool.insert(pred);
         uprank[candidate] += Wmeans[candidate];
         computed[candidate] = true;
-        predPool.erase(It);
+        predPool.erase(it);
       }
     }
 
@@ -266,29 +269,29 @@ namespace HEFT_CPP {
       TDT tmpEst{};
       for (const NBT pred: tspc->predecessors[task]) {
         auto [predProcessor, predStart, predEnd] = sch.taskSchedule[pred];
-        if (predProcessor!=processor)[[likely]]
-          tmpEst = max(tmpEst, predEnd + tspc->L[predProcessor]
-                             + tspc->data[pred][task] / tspc->B[predProcessor][processor]);
+        if (predProcessor != processor)[[likely]]
+            tmpEst = max(tmpEst, predEnd + tspc->L[predProcessor]
+                                 + tspc->data[pred][task] / tspc->B[predProcessor][processor]);
         else[[unlikely]]
-          tmpEst = max(tmpEst, predEnd);
+            tmpEst = max(tmpEst, predEnd);
       }
-      if (sch._processorSchedule[processor].empty() || get<2>(*sch._processorSchedule[processor].rbegin())<tmpEst)
+      if (sch._processorSchedule[processor].empty() || get<2>(*sch._processorSchedule[processor].rbegin()) < tmpEst)
         return tmpEst;
       auto prevIt{sch._processorSchedule[processor].begin()};
       auto it{prevIt};
       ++it;
-      if (sch._processorSchedule[processor].end()==it) {
+      if (sch._processorSchedule[processor].end() == it) {
         // only one element scheduled on processor
         return max(tmpEst, get<2>(*prevIt));
       }
-      while(it!=sch._processorSchedule[processor].end() && get<1>(*it)<tmpEst+tspc->W[task][processor])
+      while (it != sch._processorSchedule[processor].end() && get<1>(*it) < tmpEst + tspc->W[task][processor])
         ++prevIt, ++it;
-      if (it==sch._processorSchedule[processor].end())
+      if (it == sch._processorSchedule[processor].end())
         return max(tmpEst, get<2>(*prevIt));
       TDT gap;
-      while (it!=sch._processorSchedule[processor].end()) {
-        gap = get<1>(*it)-get<2>(*prevIt);
-        if(gap>0 && get<2>(*prevIt)>=tmpEst && gap>=tmpEst+tspc->W[task][processor]) {
+      while (it != sch._processorSchedule[processor].end()) {
+        gap = get<1>(*it) - get<2>(*prevIt);
+        if (gap > 0 && get<2>(*prevIt) >= tmpEst && gap >= tmpEst + tspc->W[task][processor]) {
           return get<2>(*prevIt);
         }
         ++prevIt, ++it;
@@ -297,23 +300,16 @@ namespace HEFT_CPP {
     }
 
 
-
     Schedule &solve() {
       // uprank[i] is the uprank of task i
       vector<TDT> uprank(tspc->v, -1);
       computeUprank(uprank);
 
-      // EST[i][j] is the earliest execution start time of task i on processor j
-      // vector<vector<TDT> > EST(tspc->v, vector<TDT>(tspc->q, 0));
-
-      // EFT[i][j] is the earliest execution finish time of task i on processor j
-      // vector<vector<TDT> > EFT(tspc->v, vector<TDT>(tspc->q, 0));
-
       // sorting tasks in nonincreasing uprank order
       vector<pair<TDT, NBT> > uprankTaskNum(tspc->v, {0, 0});
       for (NBT task{}; task < tspc->v; ++task)
         uprankTaskNum[task] = {uprank[task], task};
-      sort(uprankTaskNum.begin(), uprankTaskNum.end());
+      sort(uprankTaskNum.begin(), uprankTaskNum.end(), greater<>());
 
       TDT bestEFT{}, currentEFT{}, currentEST{}, bestEST{};
       NBT bestProcessor{};
@@ -327,8 +323,8 @@ namespace HEFT_CPP {
           currentEFT = currentEST + tspc->W[task][processor];
           if (bestEFT > currentEFT)
             bestEFT = currentEFT,
-            bestProcessor = processor,
-            bestEST = currentEST;
+                bestProcessor = processor,
+                bestEST = currentEST;
         }
         sch.scheduleTask(task, bestProcessor, bestEST, bestEFT);
       }
@@ -373,14 +369,13 @@ namespace HEFT_CPP {
       cin >> tspc.L[processor];
     return tspc;
   }
-
 } // namespace HEFT_CPP
 
 int main() {
   using namespace HEFT_CPP;
   TaskSchedulingProblemConfig tspc{readTspc(cin)};
   HeftAlgorithm heft(&tspc);
-  Schedule schedule {heft.solve()};
+  Schedule schedule{heft.solve()};
   cout << schedule << endl;
   return 0;
 }
