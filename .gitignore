@@ -44,5 +44,8 @@
 .idea/
 .idea/*
 
+gmon.out
+
 SequentialHeft
-class_resources/task*
+test/task_graph_10000_1000_seed_80905.json
+

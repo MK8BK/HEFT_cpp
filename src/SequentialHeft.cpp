@@ -11,6 +11,9 @@
 #include <tuple>
 #include <stack>
 #include <rapidjson/document.h>
+
+// #define JSON_VERIFICATION 0
+
 using namespace std;
 
 namespace HEFT_CPP {
@@ -66,7 +69,7 @@ namespace HEFT_CPP {
         vector<DRT>(processorCount, 1)),
       W(taskCount, vector<TDT>(processorCount, 0)),
       L(processorCount, 0) {
-      for (NBT p{}; p<processorCount; ++p) B[p][p] = 0;
+      for (NBT p{}; p < processorCount; ++p) B[p][p] = 0;
     }
 
     // destructor, change if using dynamic c-style array
@@ -121,20 +124,22 @@ namespace HEFT_CPP {
     vector<vector<NBT> > predecessors;
 
     // vector of communication data to send to successors
-    vector<DST>  data;
+    vector<DST> data;
 
     // execution time of jobs on homogenous processors
-    vector<TDT>  W;
+    vector<TDT> W;
 
     // disable the default constructor
     HomogenousTaskSchedulingProblemConfig() = delete;
 
     // the only allowed constructor
-    HomogenousTaskSchedulingProblemConfig(const NBT taskCount, const NBT processorCount) : v(taskCount), q(processorCount),
+    HomogenousTaskSchedulingProblemConfig(const NBT taskCount, const NBT processorCount) : v(taskCount),
+      q(processorCount),
       successors(taskCount, vector<NBT>(0)),
       predecessors(taskCount, vector<NBT>(0)),
       data(taskCount, 0),
-      W(taskCount,0) {}
+      W(taskCount, 0) {
+    }
 
     // destructor, change if using dynamic c-style array
     ~HomogenousTaskSchedulingProblemConfig() = default;
@@ -186,7 +191,7 @@ namespace HEFT_CPP {
 
     TDT getMakeSpan() const {
       TDT res{};
-      for (NBT p{}; p<q; ++p)
+      for (NBT p{}; p < q; ++p)
         if (!_processorSchedule[p].empty())
           res = max(res, get<2>(*_processorSchedule[p].rbegin()));
       return res;
@@ -210,53 +215,39 @@ namespace HEFT_CPP {
 
   class HomogenousHeftAlgorithm {
   public:
-    explicit HomogenousHeftAlgorithm (HomogenousTaskSchedulingProblemConfig *tspcp) : tspc(tspcp),
-                                                                 sch(tspcp->v, tspcp->q) {
+    explicit HomogenousHeftAlgorithm(HomogenousTaskSchedulingProblemConfig *tspcp) : tspc(tspcp),
+      sch(tspcp->v, tspcp->q) {
     }
 
     HomogenousTaskSchedulingProblemConfig *tspc;
     Schedule sch;
 
+    void computeRank(vector<TDT>& uprank, vector<bool>& computed, const NBT task) const {
+      if (computed[task]) return;
+      for (NBT succ : tspc->successors[task]) {
+        if (!computed[succ])[[unlikely]]
+          computeRank(uprank, computed, succ);
+        uprank[task] = max(uprank[task], uprank[succ]);
+      }
+      uprank[task] += tspc->data[task] + tspc->W[task];
+      computed[task] = true;
+    }
+
     void computeUprank(vector<TDT> &uprank) const {
       unordered_set<NBT> exitTasks;
+      unordered_set<NBT> entryTasks;
       for (NBT ni{}; ni < tspc->v; ni++) {
         if (tspc->successors[ni].empty()) exitTasks.insert(ni);
+        if (tspc->predecessors[ni].empty()) entryTasks.insert(ni);
       }
 
       vector<bool> computed(tspc->v, false);
-      unordered_set<NBT> predPool;
       for (const NBT exitTask: exitTasks) {
         uprank[exitTask] = tspc->W[exitTask];
         computed[exitTask] = true;
-        for (NBT task: tspc->predecessors[exitTask])
-          predPool.insert(task);
       }
-      auto canCompute = [&computed, this](const NBT task) {
-        return all_of(tspc->successors[task].begin(), tspc->successors[task].end(),
-                      [&computed](const NBT pred) {
-                        return computed[pred];
-                      }
-        );
-      };
-      // compute uprank of all tasks
-      while (!predPool.empty()) {
-        // find next uprank computation candidate
-        auto it{predPool.begin()};
-        while (it != predPool.end() && !canCompute(*it)) ++it;
-
-        // compute uprank of candidate
-        const NBT candidate{*it};
-        uprank[candidate] = 0;
-        for (const NBT succ: tspc->successors[candidate])
-          uprank[candidate] = max(uprank[candidate], uprank[succ]);
-        uprank[candidate] += tspc->data[candidate];
-        for (NBT pred: tspc->predecessors[candidate])
-          if (predPool.find(pred) == predPool.end() && !computed[pred])
-            predPool.insert(pred);
-        uprank[candidate] += tspc->W[candidate];
-        computed[candidate] = true;
-        predPool.erase(it);
-      }
+      for (const NBT task : entryTasks)
+        computeRank(uprank, computed, task);
     }
 
     TDT computeEST(NBT task, NBT processor) {
@@ -334,6 +325,18 @@ namespace HEFT_CPP {
     TaskSchedulingProblemConfig *tspc;
     Schedule sch;
 
+    void computeRank(vector<TDT>& uprank, vector<bool>& computed, vector<TDT>& Wmeans, vector<vector<TDT>>& cmeans,
+      const NBT task) const {
+      if (computed[task]) return;
+      for (const NBT succ : tspc->successors[task]) {
+        if (!computed[succ])[[unlikely]]
+          computeRank(uprank, computed, Wmeans, cmeans, succ);
+        uprank[task] = max(uprank[task], cmeans[task][succ]+uprank[succ]);
+      }
+      uprank[task] += Wmeans[task];
+      computed[task] = true;
+    }
+
     void computeUprank(vector<TDT> &uprank) const {
       // compute the mean communication startup cost
       const TDT Lmean{accumulate(tspc->L.begin(), tspc->L.end(), static_cast<TDT>(0)) / tspc->q};
@@ -345,7 +348,7 @@ namespace HEFT_CPP {
 
       // Bmeans is the average data transfer rate between processors
       DRT Bmean{};
-      if (tspc->q==static_cast<NBT>(0)) Bmean = 1;
+      if (tspc->q == static_cast<NBT>(0)) Bmean = 1;
       else {
         for (auto vect: tspc->B)
           Bmean += accumulate(vect.begin(), vect.end(), static_cast<DRT>(0));
@@ -363,44 +366,19 @@ namespace HEFT_CPP {
       }
 
       unordered_set<NBT> exitTasks;
+      unordered_set<NBT> entryTasks;
       for (NBT ni{}; ni < tspc->v; ni++) {
         if (tspc->successors[ni].empty()) exitTasks.insert(ni);
+        if (tspc->predecessors[ni].empty()) entryTasks.insert(ni);
       }
 
       vector<bool> computed(tspc->v, false);
-      unordered_set<NBT> predPool;
       for (const NBT exitTask: exitTasks) {
         uprank[exitTask] = Wmeans[exitTask];
         computed[exitTask] = true;
-        for (NBT task: tspc->predecessors[exitTask])
-          predPool.insert(task);
       }
-      auto canCompute = [&computed, this](const NBT task) {
-        return all_of(tspc->successors[task].begin(), tspc->successors[task].end(),
-                      [&computed](const NBT pred) {
-                        return computed[pred];
-                      }
-        );
-      };
-      // compute uprank of all tasks
-      while (!predPool.empty()) {
-        // find next uprank computation candidate
-        auto it{predPool.begin()};
-        while (it != predPool.end() && !canCompute(*it)) ++it;
-
-        // compute uprank of candidate
-        const NBT candidate{*it};
-        uprank[candidate] = 0;
-        for (const NBT succ: tspc->successors[candidate]) {
-          uprank[candidate] = max(uprank[candidate], cmeans[candidate][succ] + uprank[succ]);
-        }
-        for (NBT pred: tspc->predecessors[candidate])
-          if (predPool.find(pred) == predPool.end() && !computed[pred])
-            predPool.insert(pred);
-        uprank[candidate] += Wmeans[candidate];
-        computed[candidate] = true;
-        predPool.erase(it);
-      }
+      for (const NBT entryTask : entryTasks)
+        computeRank(uprank, computed, Wmeans, cmeans, entryTask);
     }
 
     TDT computeEST(NBT task, NBT processor) {
@@ -508,33 +486,36 @@ namespace HEFT_CPP {
     return tspc;
   }
 
-  bool checkSchedule(TaskSchedulingProblemConfig& tspc, Schedule& sc) {
-    for (NBT task{}; task<sc.v; ++task) {
+  bool checkSchedule(TaskSchedulingProblemConfig &tspc, Schedule &sc) {
+    for (NBT task{}; task < sc.v; ++task) {
       auto [p, s, e] = sc.taskSchedule[task];
-      for (NBT succ : tspc.successors[task]) {
+      for (NBT succ: tspc.successors[task]) {
         auto [sp, ss, se] = sc.taskSchedule[succ];
-        if (sp==p && ss<e) return false;
-        if (sp!=p && e+tspc.L[p]+tspc.data[task][succ]/tspc.B[p][sp]>ss) return false;
-      }
-    }
-    return true;
-  }
-  bool checkHomogenousSchedule(HomogenousTaskSchedulingProblemConfig& tspc, Schedule& sc) {
-    for (NBT task{}; task<sc.v; ++task) {
-      auto [p, s, e] = sc.taskSchedule[task];
-      for (NBT succ : tspc.successors[task]) {
-        auto [sp, ss, se] = sc.taskSchedule[succ];
-        if (sp==p && ss<e) return false;
-        if (sp!=p && e+tspc.data[task]>ss) return false;
+        if (sp == p && ss < e) return false;
+        if (sp != p && e + tspc.L[p] + tspc.data[task][succ] / tspc.B[p][sp] > ss) return false;
       }
     }
     return true;
   }
 
-  optional<HomogenousTaskSchedulingProblemConfig> fromJson(const string& jsonSource, const NBT processorCount) {
+  bool checkHomogenousSchedule(HomogenousTaskSchedulingProblemConfig &tspc, Schedule &sc) {
+    for (NBT task{}; task < sc.v; ++task) {
+      auto [p, s, e] = sc.taskSchedule[task];
+      for (NBT succ: tspc.successors[task]) {
+        auto [sp, ss, se] = sc.taskSchedule[succ];
+        if (sp == p && ss < e) return false;
+        if (sp != p && e + tspc.data[task] > ss) return false;
+      }
+    }
+    return true;
+  }
+
+  optional<HomogenousTaskSchedulingProblemConfig> fromJson(const string &jsonSource, const NBT processorCount) {
     using namespace rapidjson;
     Document document;
-    if (document.Parse(jsonSource.c_str()).HasParseError()) [[unlikely]] {
+    document.Parse(jsonSource.c_str());
+#ifdef JSON_VERIFICATION
+    if (document.HasParseError()) [[unlikely]] {
       cerr << "[Json Decoding error]\n";
       return nullopt;
     }
@@ -550,39 +531,48 @@ namespace HEFT_CPP {
       cerr << "[Json error: tasks entry is not an array]\n";
       return nullopt;
     }
-    const Value& tasks{document["tasks"]};
+#endif
+    const Value &tasks{document["tasks"]};
     NBT taskCount{tasks.Size()};
     HomogenousTaskSchedulingProblemConfig tspc(taskCount, processorCount);
-    NBT count{}, task, pred;
+    TDT task, pred;
     TDT duration;
     vector<DST> memories(taskCount, 0);
-    auto taskNameToId = [](const string& s){return stol(s.substr(4))-1;};
-    for (auto& taskV : tasks.GetArray()) {
+    auto taskNameToId = [](const string &s) { return stol(s.substr(4)) - 1; };
+#ifdef JSON_VERIFICATION
+    NBT count{};
+#endif
+    for (auto &taskV: tasks.GetArray()) {
+#ifdef JSON_VERIFICATION
       ++count;
-      if (!taskV.IsObject() || !taskV.HasMember("id")||
-        !taskV.HasMember("duration") || !taskV.HasMember("memory")||
-        !taskV.HasMember("dependencies") || !taskV["duration"].IsInt64()
-        || !taskV["id"].IsString() || !taskV["memory"].IsInt64() ||
-        !taskV["dependencies"].IsArray()) [[unlikely]] {
-          cerr << "[Json error: task" << count << " has an invalid structure]\n";
-          return nullopt;
-        }
+      if (!taskV.IsObject() || !taskV.HasMember("id") ||
+          !taskV.HasMember("duration") || !taskV.HasMember("memory") ||
+          !taskV.HasMember("dependencies") || !taskV["duration"].IsInt64()
+          || !taskV["id"].IsString() || !taskV["memory"].IsInt64() ||
+          !taskV["dependencies"].IsArray()) [[unlikely]] {
+        cerr << "[Json error: task" << count << " has an invalid structure]\n";
+        return nullopt;
+      }
+#endif
       task = taskNameToId(taskV["id"].GetString());
       memories[task] = taskV["memory"].GetInt64();
       duration = taskV["duration"].GetInt64();
       tspc.W[task] = duration;
-      for (auto& taskId : taskV["dependencies"].GetArray()) {
+      tspc.predecessors[task].reserve(taskV["dependencies"].GetArray().Size());
+      for (auto &taskId: taskV["dependencies"].GetArray()) {
+#ifdef JSON_VERIFICATION
         if (!taskId.IsString()) [[unlikely]] {
           cerr << "[Json error: task" << count << " has an invalid structure]\n";
           return nullopt;
         }
+#endif
         pred = taskNameToId(taskId.GetString());
         tspc.successors[pred].push_back(task);
         tspc.predecessors[task].push_back(pred);
       }
     }
-    for (task=0; task<tspc.v; ++task)
-        tspc.data[task] = memories[task];
+    for (task = 0; task < tspc.v; ++task)
+      tspc.data[task] = memories[task];
     return tspc;
   }
 } // namespace HEFT_CPP
@@ -592,23 +582,23 @@ void description_message() {
   cout << "  -p <processor_count> -f <json_file_path>\n\n";
   cout << "   or interactively redirect .txt file using the following format\n";
   cout <<
-   "      - two integers representing the number of tasks and the number of processors\n"
-   "      - v lines are read, each one starts with the number of task successors\n"
-   "      then the ids of said successors\n"
-   "      - then vxv matrix data is read, the data transfer sizes between tasks\n"
-   "      - then qxq matrix B is read, the data transfer rate between processors\n"
-   "      - then vxq matrix W is read, the execution time of tasks on processors\n"
-   "      - then q number form the vector L, the communication startup costs of processors\n";
+      "      - two integers representing the number of tasks and the number of processors\n"
+      "      - v lines are read, each one starts with the number of task successors\n"
+      "      then the ids of said successors\n"
+      "      - then vxv matrix data is read, the data transfer sizes between tasks\n"
+      "      - then qxq matrix B is read, the data transfer rate between processors\n"
+      "      - then vxq matrix W is read, the execution time of tasks on processors\n"
+      "      - then q number form the vector L, the communication startup costs of processors\n";
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   using namespace HEFT_CPP;
 
-  if (argc==2 && strcmp(argv[1],"-h")==0) {
+  if (argc == 2 && strcmp(argv[1], "-h") == 0) {
     description_message();
     return EXIT_SUCCESS;
   }
-  if (argc==5 && strcmp(argv[1], "-p")==0 && strcmp(argv[3], "-f")==0) {
+  if (argc == 5 && strcmp(argv[1], "-p") == 0 && strcmp(argv[3], "-f") == 0) {
     NBT processorCount{stol(argv[2])};
     ifstream fs(argv[4], ios::in);
     const size_t fileSize{filesystem::file_size(argv[4])};
@@ -616,7 +606,7 @@ int main(int argc, char* argv[]) {
     fs.read(fileContents.data(), static_cast<streamsize>(fileSize));
     optional<HomogenousTaskSchedulingProblemConfig> otspc{fromJson(fileContents, processorCount)};
     fileContents.clear(); // deallocate
-    if (otspc==nullopt) {
+    if (otspc == nullopt) {
       cerr << "Could not decode graph in json format, aborting.\n";
       return EXIT_FAILURE;
     }
