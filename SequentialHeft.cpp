@@ -163,32 +163,6 @@ namespace HEFT_CPP {
     return os;
   }
 
-  /**
-   * deprecate soon
-   * @param tspc /
-   * @param t1
-   * @param t2
-   * @return true if t2 depends on t1 (using dfs)
-   */
-  bool taskPrecedes(const TaskSchedulingProblemConfig &tspc, const NBT t1, const NBT t2) {
-    vector<bool> visited;
-    stack<NBT> s;
-    s.push(t1);
-    while (s.size() != static_cast<size_t>(0)) {
-      const NBT candidate{s.top()};
-      if (candidate == t2) return true;
-      s.pop();
-      if (visited[candidate]) continue;
-      for (NBT succ: tspc.successors[candidate]) {
-        if (succ == t2) return true;
-        if (!visited[succ])
-          s.push(succ);
-      }
-    }
-    return false;
-  }
-
-
   class HeftAlgorithm {
   public:
     explicit HeftAlgorithm(TaskSchedulingProblemConfig *tspcp) : tspc(tspcp),
@@ -371,6 +345,17 @@ namespace HEFT_CPP {
       in >> tspc.L[processor];
     return tspc;
   }
+  bool checkSchedule(TaskSchedulingProblemConfig& tspc, Schedule& sc) {
+    for (NBT task{}; task<sc.v; ++task) {
+      auto [p, s, e] = sc.taskSchedule[task];
+      for (NBT succ : tspc.successors[task]) {
+        auto [sp, ss, se] = sc.taskSchedule[succ];
+        if (sp==p && ss<e) return false;
+        if (sp!=p && e+tspc.L[p]+tspc.data[task][succ]/tspc.B[p][sp]>ss) return false;
+      }
+    }
+    return true;
+  }
 } // namespace HEFT_CPP
 
 int main() {
@@ -379,5 +364,11 @@ int main() {
   HeftAlgorithm heft(&tspc);
   Schedule schedule{heft.solve()};
   cout << schedule << endl;
+  bool validSchedule{checkSchedule(tspc, schedule)};
+  if (validSchedule)
+    cout << "Schedule satisfies constraints." << endl;
+  else
+    cout << "Schedule does not satisfie constraints." << endl;
+
   return 0;
 }
