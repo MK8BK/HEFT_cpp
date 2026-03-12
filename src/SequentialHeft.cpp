@@ -462,7 +462,6 @@ int main(int argc, char* argv[]) {
       cerr << "Could not decode graph in json format, aborting.\n";
       return EXIT_FAILURE;
     }
-    cout << "got here" << endl;
     HeftAlgorithm heft(&otspc.value());
     Schedule sch{heft.solve()};
     cout << sch << '\n';
