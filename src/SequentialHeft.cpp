@@ -151,6 +151,14 @@ namespace HEFT_CPP {
         scheduled[task] = true;
       }
     }
+
+    TDT getMakeSpan() const {
+      TDT res{};
+      for (NBT p{}; p<q; ++p)
+        if (!_processorSchedule[p].empty())
+          res = max(res, get<2>(*_processorSchedule[p].rbegin()));
+      return res;
+    }
   };
 
   ostream &operator<<(ostream &os, const Schedule &sc) {
@@ -462,6 +470,7 @@ int main(int argc, char* argv[]) {
       cout << "Schedule satisfies constraints." << endl;
     else
       cout << "Schedule does not satisfy constraints." << endl;
+    cout << "Makespan is " << sch.getMakeSpan() << '.' << endl;
     return EXIT_SUCCESS;
   }
 
@@ -474,5 +483,6 @@ int main(int argc, char* argv[]) {
     cout << "Schedule satisfies constraints." << endl;
   else
     cout << "Schedule does not satisfy constraints." << endl;
+  cout << "Makespan is " << schedule.getMakeSpan() << '.' << endl;
   return EXIT_SUCCESS;
 }
