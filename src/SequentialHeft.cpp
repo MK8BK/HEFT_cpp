@@ -12,7 +12,10 @@
 #include <stack>
 #include <rapidjson/document.h>
 
-// #define JSON_VERIFICATION 0
+#define JSON_VERIFICATION
+// comment below to enable json verification
+#undef JSON_VERIFICATION
+
 
 using namespace std;
 
@@ -222,11 +225,11 @@ namespace HEFT_CPP {
     HomogenousTaskSchedulingProblemConfig *tspc;
     Schedule sch;
 
-    void computeRank(vector<TDT>& uprank, vector<bool>& computed, const NBT task) const {
+    void computeRank(vector<TDT> &uprank, vector<bool> &computed, const NBT task) const {
       if (computed[task]) return;
-      for (NBT succ : tspc->successors[task]) {
+      for (NBT succ: tspc->successors[task]) {
         if (!computed[succ])[[unlikely]]
-          computeRank(uprank, computed, succ);
+            computeRank(uprank, computed, succ);
         uprank[task] = max(uprank[task], uprank[succ]);
       }
       uprank[task] += tspc->data[task] + tspc->W[task];
@@ -246,7 +249,7 @@ namespace HEFT_CPP {
         uprank[exitTask] = tspc->W[exitTask];
         computed[exitTask] = true;
       }
-      for (const NBT task : entryTasks)
+      for (const NBT task: entryTasks)
         computeRank(uprank, computed, task);
     }
 
@@ -325,13 +328,13 @@ namespace HEFT_CPP {
     TaskSchedulingProblemConfig *tspc;
     Schedule sch;
 
-    void computeRank(vector<TDT>& uprank, vector<bool>& computed, vector<TDT>& Wmeans, vector<vector<TDT>>& cmeans,
-      const NBT task) const {
+    void computeRank(vector<TDT> &uprank, vector<bool> &computed, vector<TDT> &Wmeans, vector<vector<TDT> > &cmeans,
+                     const NBT task) const {
       if (computed[task]) return;
-      for (const NBT succ : tspc->successors[task]) {
+      for (const NBT succ: tspc->successors[task]) {
         if (!computed[succ])[[unlikely]]
-          computeRank(uprank, computed, Wmeans, cmeans, succ);
-        uprank[task] = max(uprank[task], cmeans[task][succ]+uprank[succ]);
+            computeRank(uprank, computed, Wmeans, cmeans, succ);
+        uprank[task] = max(uprank[task], cmeans[task][succ] + uprank[succ]);
       }
       uprank[task] += Wmeans[task];
       computed[task] = true;
@@ -377,7 +380,7 @@ namespace HEFT_CPP {
         uprank[exitTask] = Wmeans[exitTask];
         computed[exitTask] = true;
       }
-      for (const NBT entryTask : entryTasks)
+      for (const NBT entryTask: entryTasks)
         computeRank(uprank, computed, Wmeans, cmeans, entryTask);
     }
 
@@ -579,7 +582,7 @@ namespace HEFT_CPP {
 
 void description_message() {
   cout << "Usage:\n";
-  cout << "  -p <processor_count> -f <json_file_path>\n\n";
+  cout << "  -p <processor_count> -f <json_file_path> [-schedule_verification] [-compute_makespan]\n\n";
   cout << "   or interactively redirect .txt file using the following format\n";
   cout <<
       "      - two integers representing the number of tasks and the number of processors\n"
@@ -598,7 +601,7 @@ int main(int argc, char *argv[]) {
     description_message();
     return EXIT_SUCCESS;
   }
-  if (argc == 5 && strcmp(argv[1], "-p") == 0 && strcmp(argv[3], "-f") == 0) {
+  if (argc >= 5 && strcmp(argv[1], "-p") == 0 && strcmp(argv[3], "-f") == 0) {
     NBT processorCount{stol(argv[2])};
     ifstream fs(argv[4], ios::in);
     const size_t fileSize{filesystem::file_size(argv[4])};
@@ -613,11 +616,16 @@ int main(int argc, char *argv[]) {
     HomogenousHeftAlgorithm heft(&otspc.value());
     Schedule sch{heft.solve()};
     cout << sch << '\n';
-    if (checkHomogenousSchedule(otspc.value(), sch))
-      cout << "Schedule satisfies constraints." << endl;
-    else
-      cout << "Schedule does not satisfy constraints." << endl;
-    cout << "Makespan is " << sch.getMakeSpan() << '.' << endl;
+    for (int i{5}; i < argc; ++i) {
+      if (strcmp(argv[i], "-schedule_verification") == 0) {
+        if (checkHomogenousSchedule(otspc.value(), sch))
+          cout << "Schedule satisfies constraints." << endl;
+        else
+          cout << "Schedule does not satisfy constraints." << endl;
+      } else if (strcmp(argv[i], "-compute_makespan") == 0) {
+        cout << "Makespan is " << sch.getMakeSpan() << '.' << endl;
+      }
+    }
     return EXIT_SUCCESS;
   }
 
@@ -626,10 +634,15 @@ int main(int argc, char *argv[]) {
   HeftAlgorithm heft(&tspc);
   Schedule schedule{heft.solve()};
   cout << schedule << endl;
-  if (checkSchedule(tspc, schedule))
-    cout << "Schedule satisfies constraints." << endl;
-  else
-    cout << "Schedule does not satisfy constraints." << endl;
-  cout << "Makespan is " << schedule.getMakeSpan() << '.' << endl;
+  for (int i{1}; i < argc; ++i) {
+    if (strcmp(argv[i], "-schedule_verification") == 0) {
+      if (checkSchedule(tspc, schedule))
+        cout << "Schedule satisfies constraints." << endl;
+      else
+        cout << "Schedule does not satisfy constraints." << endl;
+    } else if (strcmp(argv[i], "-compute_makespan") == 0) {
+      cout << "Makespan is " << schedule.getMakeSpan() << '.' << endl;
+    }
+  }
   return EXIT_SUCCESS;
 }

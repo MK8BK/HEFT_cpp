@@ -48,4 +48,5 @@ gmon.out
 
 SequentialHeft
 test/task_graph_10000_1000_seed_80905.json
+test/benchmarks/*.json
 

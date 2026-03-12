@@ -19,5 +19,9 @@ gprof SequentialHeft gmon.out | gprof2dot -s -w | dot -Gdpi=200 -Tpng -o test/pr
 # to optimize
 g++ -o SequentialHeft src/SequentialHeft.cpp -Wall -Werror -std=c++20 -I include/ -O2
 time ./SequentialHeft -p 20 -f test/task_graph_10000_1000_seed_80905.json
+
+# you can also add the `-schedule_verification` and `-compute_makespan` options to either
+# version of the calls above to check that the produced schedule satisfies the constraints
+# and to compute its associated makespan respectively
 ```
 
