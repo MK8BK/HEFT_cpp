@@ -108,6 +108,38 @@ namespace HEFT_CPP {
     }
   };
 
+  class HomogenousTaskSchedulingProblemConfig {
+  public:
+    // Each node has an ID in [0, v[
+    const NBT v;
+
+    // number of processors to accomplish tasks
+    const NBT q;
+
+    // The successors and predecessors are accessible in O(1)
+    vector<vector<NBT> > successors;
+    vector<vector<NBT> > predecessors;
+
+    // vector of communication data to send to successors
+    vector<DST>  data;
+
+    // execution time of jobs on homogenous processors
+    vector<TDT>  W;
+
+    // disable the default constructor
+    HomogenousTaskSchedulingProblemConfig() = delete;
+
+    // the only allowed constructor
+    HomogenousTaskSchedulingProblemConfig(const NBT taskCount, const NBT processorCount) : v(taskCount), q(processorCount),
+      successors(taskCount, vector<NBT>(0)),
+      predecessors(taskCount, vector<NBT>(0)),
+      data(taskCount, 0),
+      W(taskCount,0) {}
+
+    // destructor, change if using dynamic c-style array
+    ~HomogenousTaskSchedulingProblemConfig() = default;
+  };
+
   struct schedComp {
     bool operator()(const tuple<NBT, TDT, TDT> &t1, const tuple<NBT, TDT, TDT> &t2) const {
       return get<1>(t1) < get<1>(t2);
@@ -175,6 +207,123 @@ namespace HEFT_CPP {
     }
     return os;
   }
+
+  class HomogenousHeftAlgorithm {
+  public:
+    explicit HomogenousHeftAlgorithm (HomogenousTaskSchedulingProblemConfig *tspcp) : tspc(tspcp),
+                                                                 sch(tspcp->v, tspcp->q) {
+    }
+
+    HomogenousTaskSchedulingProblemConfig *tspc;
+    Schedule sch;
+
+    void computeUprank(vector<TDT> &uprank) const {
+      unordered_set<NBT> exitTasks;
+      for (NBT ni{}; ni < tspc->v; ni++) {
+        if (tspc->successors[ni].empty()) exitTasks.insert(ni);
+      }
+
+      vector<bool> computed(tspc->v, false);
+      unordered_set<NBT> predPool;
+      for (const NBT exitTask: exitTasks) {
+        uprank[exitTask] = tspc->W[exitTask];
+        computed[exitTask] = true;
+        for (NBT task: tspc->predecessors[exitTask])
+          predPool.insert(task);
+      }
+      auto canCompute = [&computed, this](const NBT task) {
+        return all_of(tspc->successors[task].begin(), tspc->successors[task].end(),
+                      [&computed](const NBT pred) {
+                        return computed[pred];
+                      }
+        );
+      };
+      // compute uprank of all tasks
+      while (!predPool.empty()) {
+        // find next uprank computation candidate
+        auto it{predPool.begin()};
+        while (it != predPool.end() && !canCompute(*it)) ++it;
+
+        // compute uprank of candidate
+        const NBT candidate{*it};
+        uprank[candidate] = 0;
+        for (const NBT succ: tspc->successors[candidate])
+          uprank[candidate] = max(uprank[candidate], uprank[succ]);
+        uprank[candidate] += tspc->data[candidate];
+        for (NBT pred: tspc->predecessors[candidate])
+          if (predPool.find(pred) == predPool.end() && !computed[pred])
+            predPool.insert(pred);
+        uprank[candidate] += tspc->W[candidate];
+        computed[candidate] = true;
+        predPool.erase(it);
+      }
+    }
+
+    TDT computeEST(NBT task, NBT processor) {
+      TDT tmpEst{};
+      for (const NBT pred: tspc->predecessors[task]) {
+        auto [predProcessor, predStart, predEnd] = sch.taskSchedule[pred];
+        if (predProcessor != processor)[[likely]]
+            tmpEst = max(tmpEst, predEnd + tspc->data[pred]);
+        else[[unlikely]]
+            tmpEst = max(tmpEst, predEnd);
+      }
+      if (sch._processorSchedule[processor].empty() || get<2>(*sch._processorSchedule[processor].rbegin()) < tmpEst)
+        return tmpEst;
+      auto prevIt{sch._processorSchedule[processor].begin()};
+      auto it{prevIt};
+      ++it;
+      if (sch._processorSchedule[processor].end() == it) {
+        // only one element scheduled on processor
+        return max(tmpEst, get<2>(*prevIt));
+      }
+      while (it != sch._processorSchedule[processor].end() && get<1>(*it) < tmpEst + tspc->W[task])
+        ++prevIt, ++it;
+      if (it == sch._processorSchedule[processor].end())
+        return max(tmpEst, get<2>(*prevIt));
+      TDT gap;
+      while (it != sch._processorSchedule[processor].end()) {
+        gap = get<1>(*it) - get<2>(*prevIt);
+        if (gap > 0 && get<2>(*prevIt) >= tmpEst && gap >= tmpEst + tspc->W[task]) {
+          return get<2>(*prevIt);
+        }
+        ++prevIt, ++it;
+      }
+      return max(tmpEst, get<2>(*prevIt));
+    }
+
+
+    Schedule &solve() {
+      // uprank[i] is the uprank of task i
+      vector<TDT> uprank(tspc->v, -1);
+      computeUprank(uprank);
+
+      // sorting tasks in nonincreasing uprank order
+      vector<pair<TDT, NBT> > uprankTaskNum(tspc->v, {0, 0});
+      for (NBT task{}; task < tspc->v; ++task)
+        uprankTaskNum[task] = {uprank[task], task};
+      sort(uprankTaskNum.begin(), uprankTaskNum.end(), greater<>());
+
+      TDT bestEFT{}, currentEFT{}, currentEST{}, bestEST{};
+      NBT bestProcessor{};
+      for (NBT i{}; i < tspc->v; ++i) {
+        const NBT task{uprankTaskNum[i].second};
+        bestEFT = numeric_limits<TDT>::max();
+        for (NBT processor{}; processor < tspc->q; ++processor) {
+          // compute EST using insertion based scheduling policy
+          currentEST = computeEST(task, processor);
+          // compute EFT[task][processor]
+          currentEFT = currentEST + tspc->W[task];
+          if (bestEFT > currentEFT)
+            bestEFT = currentEFT,
+                bestProcessor = processor,
+                bestEST = currentEST;
+        }
+        sch.scheduleTask(task, bestProcessor, bestEST, bestEFT);
+      }
+      return sch;
+    }
+  };
 
   class HeftAlgorithm {
   public:
@@ -370,8 +519,19 @@ namespace HEFT_CPP {
     }
     return true;
   }
+  bool checkHomogenousSchedule(HomogenousTaskSchedulingProblemConfig& tspc, Schedule& sc) {
+    for (NBT task{}; task<sc.v; ++task) {
+      auto [p, s, e] = sc.taskSchedule[task];
+      for (NBT succ : tspc.successors[task]) {
+        auto [sp, ss, se] = sc.taskSchedule[succ];
+        if (sp==p && ss<e) return false;
+        if (sp!=p && e+tspc.data[task]>ss) return false;
+      }
+    }
+    return true;
+  }
 
-  optional<TaskSchedulingProblemConfig> fromJson(const string& jsonSource, const NBT processorCount) {
+  optional<HomogenousTaskSchedulingProblemConfig> fromJson(const string& jsonSource, const NBT processorCount) {
     using namespace rapidjson;
     Document document;
     if (document.Parse(jsonSource.c_str()).HasParseError()) [[unlikely]] {
@@ -392,7 +552,7 @@ namespace HEFT_CPP {
     }
     const Value& tasks{document["tasks"]};
     NBT taskCount{tasks.Size()};
-    TaskSchedulingProblemConfig tspc(taskCount, processorCount);
+    HomogenousTaskSchedulingProblemConfig tspc(taskCount, processorCount);
     NBT count{}, task, pred;
     TDT duration;
     vector<DST> memories(taskCount, 0);
@@ -410,8 +570,7 @@ namespace HEFT_CPP {
       task = taskNameToId(taskV["id"].GetString());
       memories[task] = taskV["memory"].GetInt64();
       duration = taskV["duration"].GetInt64();
-      for (NBT processor{}; processor < processorCount; ++processor)
-        tspc.W[task][processor] = duration;
+      tspc.W[task] = duration;
       for (auto& taskId : taskV["dependencies"].GetArray()) {
         if (!taskId.IsString()) [[unlikely]] {
           cerr << "[Json error: task" << count << " has an invalid structure]\n";
@@ -423,8 +582,7 @@ namespace HEFT_CPP {
       }
     }
     for (task=0; task<tspc.v; ++task)
-      for (NBT succ : tspc.successors[task])
-        tspc.data[task][succ] = memories[task];
+        tspc.data[task] = memories[task];
     return tspc;
   }
 } // namespace HEFT_CPP
@@ -456,16 +614,16 @@ int main(int argc, char* argv[]) {
     const size_t fileSize{filesystem::file_size(argv[4])};
     string fileContents(fileSize, '\0');
     fs.read(fileContents.data(), static_cast<streamsize>(fileSize));
-    optional<TaskSchedulingProblemConfig> otspc{fromJson(fileContents, processorCount)};
+    optional<HomogenousTaskSchedulingProblemConfig> otspc{fromJson(fileContents, processorCount)};
     fileContents.clear(); // deallocate
     if (otspc==nullopt) {
       cerr << "Could not decode graph in json format, aborting.\n";
       return EXIT_FAILURE;
     }
-    HeftAlgorithm heft(&otspc.value());
+    HomogenousHeftAlgorithm heft(&otspc.value());
     Schedule sch{heft.solve()};
     cout << sch << '\n';
-    if (checkSchedule(otspc.value(), sch))
+    if (checkHomogenousSchedule(otspc.value(), sch))
       cout << "Schedule satisfies constraints." << endl;
     else
       cout << "Schedule does not satisfy constraints." << endl;
