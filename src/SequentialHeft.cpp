@@ -374,12 +374,6 @@ namespace HEFT_CPP {
 #ifdef PARALLELIZED_FOR_PROCESSORS
         tp.wait_for_tasks();
 #endif
-        if (task==9) {
-          for (const TDT eft : EFT)
-            cout << eft << ' ';
-          cout << '\n';
-          //exit(EXIT_FAILURE);
-        }
         auto smallestEFT{min_element(EFT.begin(), EFT.end())};
         bestEFT = *smallestEFT;
         bestProcessor = smallestEFT - EFT.begin();
@@ -727,7 +721,7 @@ int main(int argc, char *argv[]) {
     }
     HomogenousHeftAlgorithm heft(&otspc.value());
     Schedule sch{heft.solve()};
-    cout << sch << '\n';
+    cout << sch << endl;
     for (int i{5}; i < argc; ++i) {
       if (strcmp(argv[i], "-schedule_verification") == 0) {
         if (checkHomogenousSchedule(otspc.value(), sch))
