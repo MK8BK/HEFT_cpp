@@ -12,7 +12,7 @@ g++ -o SequentialHeft src/SequentialHeft.cpp  -Wall -Werror -std=c++20 -I includ
 ./SequentialHeft -p <processor_count> -f <json_file_path>
 
 # to profile
-g++ -o SequentialHeft src/SequentialHeft.cpp -Wall -Werror -std=c++20 -I include/ -O0 -pg
+g++ -o SequentialHeft src/SequentialHeft.cpp -Wall -Werror -std=c++20 -I include/ -O2 -pg # or -O0
 time ./SequentialHeft -p 20 -f test/task_graph_10000_1000_seed_80905.json
 gprof SequentialHeft gmon.out | gprof2dot -s -w | dot -Gdpi=200 -Tpng -o test/profile.png
 

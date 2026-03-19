@@ -1,4 +1,5 @@
 #include <iostream>
+#include <thread>
 #include <fstream>
 #include <vector>
 #include <numeric>
@@ -9,8 +10,13 @@
 #include <limits>
 #include <optional>
 #include <tuple>
-#include <stack>
 #include <rapidjson/document.h>
+
+#define PARALLELIZED_FOR_PROCESSORS
+#undef PARALLELIZED_FOR_PROCESSORS
+#ifdef PARALLELIZED_FOR_PROCESSORS
+  #include <task_thread_pool.hpp>
+#endif
 
 #define JSON_VERIFICATION
 // comment below to enable json verification
@@ -148,14 +154,15 @@ namespace HEFT_CPP {
     ~HomogenousTaskSchedulingProblemConfig() = default;
   };
 
-  struct schedComp {
-    bool operator()(const tuple<NBT, TDT, TDT> &t1, const tuple<NBT, TDT, TDT> &t2) const {
-      return get<1>(t1) < get<1>(t2);
-    }
-  };
+
 
   // class to represent the final schedule
   class Schedule {
+    struct scheduledTaskComp {
+      bool operator()(const tuple<NBT, TDT, TDT> &t1, const tuple<NBT, TDT, TDT> &t2) const {
+        return get<1>(t1) < get<1>(t2);
+      }
+    };
   public:
     // number of jobs/tasks
     NBT v;
@@ -168,7 +175,7 @@ namespace HEFT_CPP {
 
 
     // processor id: ordered_set of {task id , start time, end time}
-    vector<set<tuple<NBT, TDT, TDT>, schedComp> > _processorSchedule;
+    vector<set<tuple<NBT, TDT, TDT>, scheduledTaskComp> > _processorSchedule;
 
     vector<bool> scheduled;
 
@@ -222,6 +229,7 @@ namespace HEFT_CPP {
       sch(tspcp->v, tspcp->q) {
     }
 
+  private:
     HomogenousTaskSchedulingProblemConfig *tspc;
     Schedule sch;
 
@@ -253,7 +261,7 @@ namespace HEFT_CPP {
         computeRank(uprank, computed, task);
     }
 
-    TDT computeEST(NBT task, NBT processor) {
+    TDT computeEST(const NBT task, const NBT processor) const {
       TDT tmpEst{};
       for (const NBT pred: tspc->predecessors[task]) {
         auto [predProcessor, predStart, predEnd] = sch.taskSchedule[pred];
@@ -262,18 +270,18 @@ namespace HEFT_CPP {
         else[[unlikely]]
             tmpEst = max(tmpEst, predEnd);
       }
-      if (sch._processorSchedule[processor].empty() || get<2>(*sch._processorSchedule[processor].rbegin()) < tmpEst)
+      if (sch._processorSchedule[processor].empty() || get<2>(*sch._processorSchedule[processor].rbegin()) < tmpEst)[[likely]]
         return tmpEst;
       auto prevIt{sch._processorSchedule[processor].begin()};
       auto it{prevIt};
       ++it;
-      if (sch._processorSchedule[processor].end() == it) {
+      if (sch._processorSchedule[processor].end() == it)[[unlikely]]{
         // only one element scheduled on processor
         return max(tmpEst, get<2>(*prevIt));
       }
       while (it != sch._processorSchedule[processor].end() && get<1>(*it) < tmpEst + tspc->W[task])
         ++prevIt, ++it;
-      if (it == sch._processorSchedule[processor].end())
+      if (it == sch._processorSchedule[processor].end()) [[likely]]
         return max(tmpEst, get<2>(*prevIt));
       TDT gap;
       while (it != sch._processorSchedule[processor].end()) {
@@ -287,6 +295,18 @@ namespace HEFT_CPP {
     }
 
 
+    struct gapComp {
+      bool operator()(const pair<TDT, TDT>& t1, const pair<TDT, TDT>& t2) const {
+        // smallest size first, earliest time second
+        TDT sz1{t1.second-t1.first};
+        TDT sz2{t2.second-t2.first};
+        if (sz1 < sz2) return true;
+        if (sz1==sz2) return t1.first<t2.first;
+        return false;
+      }
+    };
+
+  public:
     Schedule &solve() {
       // uprank[i] is the uprank of task i
       vector<TDT> uprank(tspc->v, -1);
@@ -298,21 +318,38 @@ namespace HEFT_CPP {
         uprankTaskNum[task] = {uprank[task], task};
       sort(uprankTaskNum.begin(), uprankTaskNum.end(), greater<>());
 
-      TDT bestEFT{}, currentEFT{}, currentEST{}, bestEST{};
-      NBT bestProcessor{};
+      TDT bestEFT, bestEST;
+      NBT bestProcessor;
+      vector<TDT> EST(tspc->q);
+      vector<TDT> EFT(tspc->q);
+      // moving from v to log(v) soon using gap abstraction
+      // vector<set<pair<TDT, TDT>, gapComp>> gaps(tspc->q, {{0, numeric_limits<TDT>::max()}});
+#ifdef PARALLELIZED_FOR_PROCESSORS
+      auto thCompute = [this](const NBT task, const NBT processor, vector<TDT>& EST, vector<TDT>& EFT) {
+        EST[processor] = computeEST(task, processor);
+        EFT[processor] = EST[processor] + tspc->W[task];
+      };
+      const int platformThreads{static_cast<int>(thread::hardware_concurrency())};
+      int numThreads{max(1, min(platformThreads-1, 2))};
+      task_thread_pool::task_thread_pool tp(numThreads);
+#endif
       for (NBT i{}; i < tspc->v; ++i) {
         const NBT task{uprankTaskNum[i].second};
-        bestEFT = numeric_limits<TDT>::max();
-        for (NBT processor{}; processor < tspc->q; ++processor) {
-          // compute EST using insertion based scheduling policy
-          currentEST = computeEST(task, processor);
-          // compute EFT[task][processor]
-          currentEFT = currentEST + tspc->W[task];
-          if (bestEFT > currentEFT)
-            bestEFT = currentEFT,
-                bestProcessor = processor,
-                bestEST = currentEST;
+        for (NBT processor = 0; processor < tspc->q; ++processor) {
+#ifdef PARALLELIZED_FOR_PROCESSORS
+          tp.submit_detach(thCompute, task, processor, std::ref(EST), std::ref(EFT));
+#else
+          EST[processor] = computeEST(task, processor);
+          EFT[processor] = EST[processor] + tspc->W[task];
+#endif
         }
+#ifdef PARALLELIZED_FOR_PROCESSORS
+        tp.wait_for_tasks();
+#endif
+        auto biggestEftP{max_element(EFT.begin(), EFT.end())};
+        bestEFT = *biggestEftP;
+        bestProcessor = biggestEftP - EFT.begin();
+        bestEST = EST[bestProcessor];
         sch.scheduleTask(task, bestProcessor, bestEST, bestEFT);
       }
       return sch;
@@ -325,6 +362,7 @@ namespace HEFT_CPP {
                                                                  sch(tspcp->v, tspcp->q) {
     }
 
+  private:
     TaskSchedulingProblemConfig *tspc;
     Schedule sch;
 
@@ -419,6 +457,7 @@ namespace HEFT_CPP {
     }
 
 
+  public:
     Schedule &solve() {
       // uprank[i] is the uprank of task i
       vector<TDT> uprank(tspc->v, -1);
