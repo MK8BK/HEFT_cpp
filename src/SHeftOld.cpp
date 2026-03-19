@@ -7,15 +7,15 @@
 #include <set>
 #include <algorithm>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <tuple>
 #include <rapidjson/document.h>
 
 #define PARALLELIZED_FOR_PROCESSORS
 #undef PARALLELIZED_FOR_PROCESSORS
-
 #ifdef PARALLELIZED_FOR_PROCESSORS
-#include <task_thread_pool.hpp>
+  #include <task_thread_pool.hpp>
 #endif
 
 #define JSON_VERIFICATION
@@ -154,21 +154,15 @@ namespace HEFT_CPP {
     ~HomogenousTaskSchedulingProblemConfig() = default;
   };
 
-  struct TaskSchedule {
-    NBT id;
-    TDT start, end;
-    TaskSchedule():id(-1), start(-1), end(-1){}
-    TaskSchedule(const NBT id, const TDT start, const TDT end):id(id), start(start), end(end){}
-  };
 
-  bool operator<(const TaskSchedule& t1, const TaskSchedule& t2) {
-    // assuming no intersections of schedules
-    return t1.end<t2.end;
-  }
 
   // class to represent the final schedule
   class Schedule {
-
+    struct scheduledTaskComp {
+      bool operator()(const tuple<NBT, TDT, TDT> &t1, const tuple<NBT, TDT, TDT> &t2) const {
+        return get<1>(t1) < get<1>(t2);
+      }
+    };
   public:
     // number of jobs/tasks
     NBT v;
@@ -181,7 +175,7 @@ namespace HEFT_CPP {
 
 
     // processor id: ordered_set of {task id , start time, end time}
-    vector<set<TaskSchedule>> _processorSchedule;
+    vector<set<tuple<NBT, TDT, TDT>, scheduledTaskComp> > _processorSchedule;
 
     vector<bool> scheduled;
 
@@ -205,11 +199,11 @@ namespace HEFT_CPP {
       }
     }
 
-    [[nodiscard]] TDT getMakeSpan() const {
+    TDT getMakeSpan() const {
       TDT res{};
       for (NBT p{}; p < q; ++p)
         if (!_processorSchedule[p].empty())
-          res = max(res, _processorSchedule[p].rbegin()->end);
+          res = max(res, get<2>(*_processorSchedule[p].rbegin()));
       return res;
     }
   };
@@ -227,17 +221,6 @@ namespace HEFT_CPP {
           os << '\n';
     }
     return os;
-  }
-
-  struct Gap {
-    TDT start, end;
-    Gap():start(-1), end(-1){}
-    Gap(const TDT start, const TDT end):start(start), end(end){}
-  };
-
-  bool operator<(const Gap& gap1, const Gap& gap2) {
-    // assume that no intersections between gaps, ok in this problem
-    return gap1.end<gap2.end;
   }
 
   class HomogenousHeftAlgorithm {
@@ -278,9 +261,7 @@ namespace HEFT_CPP {
         computeRank(uprank, computed, task);
     }
 
-
-    [[nodiscard]] TDT computeEST(const NBT task, const NBT processor,
-                                 const vector<set<Gap>> &gaps, vector<Gap>& gapCache) const {
+    TDT computeEST(const NBT task, const NBT processor) const {
       TDT tmpEst{};
       for (const NBT pred: tspc->predecessors[task]) {
         auto [predProcessor, predStart, predEnd] = sch.taskSchedule[pred];
@@ -289,49 +270,41 @@ namespace HEFT_CPP {
         else[[unlikely]]
             tmpEst = max(tmpEst, predEnd);
       }
-      if (sch._processorSchedule[processor].empty()) return tmpEst;
-      const Gap goalGap{tmpEst, tmpEst};
-      auto searchStart{upper_bound(gaps[processor].begin(), gaps[processor].end(), goalGap)};
-      TDT s,e;
-      while (searchStart!=gaps[processor].end()) {
-        s = searchStart->start, e = searchStart->end;
-        if (tmpEst+tspc->W[task]<=e) {
-          gapCache[processor] = {s, e};
-          return max(tmpEst, s);
-        }
-        ++searchStart;
+      if (sch._processorSchedule[processor].empty() || get<2>(*sch._processorSchedule[processor].rbegin()) < tmpEst)[[likely]]
+        return tmpEst;
+      auto prevIt{sch._processorSchedule[processor].begin()};
+      auto it{prevIt};
+      ++it;
+      if (sch._processorSchedule[processor].end() == it)[[unlikely]]{
+        // only one element scheduled on processor
+        return max(tmpEst, get<2>(*prevIt));
       }
-      const TDT processorEnd{sch._processorSchedule[processor].rbegin()->end};
-      gapCache[processor] = {-1,-1};
-      return max(tmpEst, processorEnd);
+      while (it != sch._processorSchedule[processor].end() && get<1>(*it) < tmpEst + tspc->W[task])
+        ++prevIt, ++it;
+      if (it == sch._processorSchedule[processor].end()) [[likely]]
+        return max(tmpEst, get<2>(*prevIt));
+      TDT gap;
+      while (it != sch._processorSchedule[processor].end()) {
+        gap = get<1>(*it) - get<2>(*prevIt);
+        if (gap > 0 && get<2>(*prevIt) >= tmpEst && gap >= tmpEst + tspc->W[task]) {
+          return get<2>(*prevIt);
+        }
+        ++prevIt, ++it;
+      }
+      return max(tmpEst, get<2>(*prevIt));
     }
 
-    void updateGaps(vector<set<Gap>> &gaps, vector<Gap>& gapCache,
-      const NBT processor, const TDT start, const TDT end,
-                    const NBT task) {
-      if (gapCache[processor].start==-1) {
-        // was scheduled at the end
-        auto lastTaskIt{sch._processorSchedule[processor].rbegin()};
-        lastTaskIt++;
-        if (lastTaskIt==sch._processorSchedule[processor].rend()) [[unlikely]]{
-          // also is first task
-          if (start>0)
-            gaps[processor].insert({0, start});
-        }else {
-          // add possible gap before
-          const TDT prevEnd{lastTaskIt->end};
-          if (prevEnd<start)
-            gaps[processor].insert({prevEnd, start});
-        }
-        return;
+
+    struct gapComp {
+      bool operator()(const pair<TDT, TDT>& t1, const pair<TDT, TDT>& t2) const {
+        // smallest size first, earliest time second
+        TDT sz1{t1.second-t1.first};
+        TDT sz2{t2.second-t2.first};
+        if (sz1 < sz2) return true;
+        if (sz1==sz2) return t1.first<t2.first;
+        return false;
       }
-      // was added to some gap
-      gaps[processor].erase(gapCache[processor]);
-      if (gapCache[processor].start<start)
-        gaps[processor].insert({gapCache[processor].start, start});
-      if (gapCache[processor].end>end)
-        gaps[processor].insert({end, gapCache[processor].end});
-    }
+    };
 
   public:
     Schedule &solve() {
@@ -350,15 +323,14 @@ namespace HEFT_CPP {
       vector<TDT> EST(tspc->q);
       vector<TDT> EFT(tspc->q);
       // moving from v to log(v) soon using gap abstraction
-      vector<set<Gap> > gaps(tspc->q);
-      vector<Gap> gapCache(tspc->q);
+      // vector<set<pair<TDT, TDT>, gapComp>> gaps(tspc->q, {{0, numeric_limits<TDT>::max()}});
 #ifdef PARALLELIZED_FOR_PROCESSORS
-      auto thCompute = [this](const NBT task, const NBT processor, vector<TDT> &EST, vector<TDT> &EFT) {
+      auto thCompute = [this](const NBT task, const NBT processor, vector<TDT>& EST, vector<TDT>& EFT) {
         EST[processor] = computeEST(task, processor);
         EFT[processor] = EST[processor] + tspc->W[task];
       };
       const int platformThreads{static_cast<int>(thread::hardware_concurrency())};
-      int numThreads{max(1, min(platformThreads - 1, 2))};
+      int numThreads{max(1, min(platformThreads-1, 2))};
       task_thread_pool::task_thread_pool tp(numThreads);
 #endif
       for (NBT i{}; i < tspc->v; ++i) {
@@ -367,25 +339,18 @@ namespace HEFT_CPP {
 #ifdef PARALLELIZED_FOR_PROCESSORS
           tp.submit_detach(thCompute, task, processor, std::ref(EST), std::ref(EFT));
 #else
-          EST[processor] = computeEST(task, processor, gaps, gapCache);
+          EST[processor] = computeEST(task, processor);
           EFT[processor] = EST[processor] + tspc->W[task];
 #endif
         }
 #ifdef PARALLELIZED_FOR_PROCESSORS
         tp.wait_for_tasks();
 #endif
-        if (task==9) {
-          for (const TDT eft : EFT)
-            cout << eft << ' ';
-          cout << '\n';
-          //exit(EXIT_FAILURE);
-        }
-        auto smallestEFT{min_element(EFT.begin(), EFT.end())};
-        bestEFT = *smallestEFT;
-        bestProcessor = smallestEFT - EFT.begin();
+        auto biggestEftP{max_element(EFT.begin(), EFT.end())};
+        bestEFT = *biggestEftP;
+        bestProcessor = biggestEftP - EFT.begin();
         bestEST = EST[bestProcessor];
         sch.scheduleTask(task, bestProcessor, bestEST, bestEFT);
-        updateGaps(gaps, gapCache, bestProcessor, bestEST, bestEFT, task);
       }
       return sch;
     }
@@ -457,7 +422,7 @@ namespace HEFT_CPP {
         computeRank(uprank, computed, Wmeans, cmeans, entryTask);
     }
 
-    TDT computeEST(NBT task, NBT processor, vector<set<Gap>>& gaps, vector<Gap>& gapCache) {
+    TDT computeEST(NBT task, NBT processor) {
       TDT tmpEst{};
       for (const NBT pred: tspc->predecessors[task]) {
         auto [predProcessor, predStart, predEnd] = sch.taskSchedule[pred];
@@ -467,49 +432,30 @@ namespace HEFT_CPP {
         else[[unlikely]]
             tmpEst = max(tmpEst, predEnd);
       }
-      if (sch._processorSchedule[processor].empty()) return tmpEst;
-      const Gap goalGap{tmpEst, tmpEst};
-      auto searchStart{upper_bound(gaps[processor].begin(), gaps[processor].end(), goalGap)};
-      TDT s,e;
-      while (searchStart!=gaps[processor].end()) {
-        s = searchStart->start, e = searchStart->end;
-        if (tmpEst+tspc->W[task][processor]<=e) {
-          gapCache[processor] = {s, e};
-          return max(tmpEst, s);
-        }
-        ++searchStart;
+      if (sch._processorSchedule[processor].empty() || get<2>(*sch._processorSchedule[processor].rbegin()) < tmpEst)
+        return tmpEst;
+      auto prevIt{sch._processorSchedule[processor].begin()};
+      auto it{prevIt};
+      ++it;
+      if (sch._processorSchedule[processor].end() == it) {
+        // only one element scheduled on processor
+        return max(tmpEst, get<2>(*prevIt));
       }
-      const TDT processorEnd{sch._processorSchedule[processor].rbegin()->end};
-      gapCache[processor] = {-1,-1};
-      return max(tmpEst, processorEnd);
+      while (it != sch._processorSchedule[processor].end() && get<1>(*it) < tmpEst + tspc->W[task][processor])
+        ++prevIt, ++it;
+      if (it == sch._processorSchedule[processor].end())
+        return max(tmpEst, get<2>(*prevIt));
+      TDT gap;
+      while (it != sch._processorSchedule[processor].end()) {
+        gap = get<1>(*it) - get<2>(*prevIt);
+        if (gap > 0 && get<2>(*prevIt) >= tmpEst && gap >= tmpEst + tspc->W[task][processor]) {
+          return get<2>(*prevIt);
+        }
+        ++prevIt, ++it;
+      }
+      return max(tmpEst, get<2>(*prevIt));
     }
 
-    void updateGaps(vector<set<Gap>> &gaps, vector<Gap>& gapCache,
-      const NBT processor, const TDT start, const TDT end,
-                    const NBT task) {
-      if (gapCache[processor].start==-1) {
-        // was scheduled at the end
-        auto lastTaskIt{sch._processorSchedule[processor].rbegin()};
-        lastTaskIt++;
-        if (lastTaskIt==sch._processorSchedule[processor].rend()) [[unlikely]]{
-          // also is first task
-          if (start>0)
-            gaps[processor].insert({0, start});
-        }else {
-          // add possible gap before
-          const TDT prevEnd{lastTaskIt->end};
-          if (prevEnd<start)
-            gaps[processor].insert({prevEnd, start});
-        }
-        return;
-      }
-      // was added to some gap
-      gaps[processor].erase(gapCache[processor]);
-      if (gapCache[processor].start<start)
-        gaps[processor].insert({gapCache[processor].start, start});
-      if (gapCache[processor].end>end)
-        gaps[processor].insert({end, gapCache[processor].end});
-    }
 
   public:
     Schedule &solve() {
@@ -523,41 +469,22 @@ namespace HEFT_CPP {
         uprankTaskNum[task] = {uprank[task], task};
       sort(uprankTaskNum.begin(), uprankTaskNum.end(), greater<>());
 
-      TDT bestEFT{}, bestEST{};
+      TDT bestEFT{}, currentEFT{}, currentEST{}, bestEST{};
       NBT bestProcessor{};
-      vector<TDT> EST(tspc->q);
-      vector<TDT> EFT(tspc->q);
-      // moving from v to log(v) soon using gap abstraction
-      vector<set<Gap> > gaps(tspc->q);
-      vector<Gap> gapCache(tspc->q);
-#ifdef PARALLELIZED_FOR_PROCESSORS
-      auto thCompute = [this](const NBT task, const NBT processor, vector<TDT> &EST, vector<TDT> &EFT) {
-        EST[processor] = computeEST(task, processor);
-        EFT[processor] = EST[processor] + tspc->W[task];
-      };
-      const int platformThreads{static_cast<int>(thread::hardware_concurrency())};
-      int numThreads{max(1, min(platformThreads - 1, 2))};
-      task_thread_pool::task_thread_pool tp(numThreads);
-#endif
       for (NBT i{}; i < tspc->v; ++i) {
         const NBT task{uprankTaskNum[i].second};
-        for (NBT processor = 0; processor < tspc->q; ++processor) {
-#ifdef PARALLELIZED_FOR_PROCESSORS
-          tp.submit_detach(thCompute, task, processor, std::ref(EST), std::ref(EFT));
-#else
-          EST[processor] = computeEST(task, processor, gaps, gapCache);
-          EFT[processor] = EST[processor] + tspc->W[task][processor];
-#endif
+        bestEFT = numeric_limits<TDT>::max();
+        for (NBT processor{}; processor < tspc->q; ++processor) {
+          // compute EST using insertion based scheduling policy
+          currentEST = computeEST(task, processor);
+          // compute EFT[task][processor]
+          currentEFT = currentEST + tspc->W[task][processor];
+          if (bestEFT > currentEFT)
+            bestEFT = currentEFT,
+                bestProcessor = processor,
+                bestEST = currentEST;
         }
-#ifdef PARALLELIZED_FOR_PROCESSORS
-        tp.wait_for_tasks();
-#endif
-        auto smallestEFT{min_element(EFT.begin(), EFT.end())};
-        bestEFT = *smallestEFT;
-        bestProcessor = smallestEFT - EFT.begin();
-        bestEST = EST[bestProcessor];
         sch.scheduleTask(task, bestProcessor, bestEST, bestEFT);
-        updateGaps(gaps, gapCache, bestProcessor, bestEST, bestEFT, task);
       }
       return sch;
     }
@@ -650,10 +577,10 @@ namespace HEFT_CPP {
     const Value &tasks{document["tasks"]};
     NBT taskCount{tasks.Size()};
     HomogenousTaskSchedulingProblemConfig tspc(taskCount, processorCount);
-    NBT task, pred;
+    TDT task, pred;
     TDT duration;
     vector<DST> memories(taskCount, 0);
-    auto taskNameToId = [](const string &s) { return static_cast<NBT>(stol(s.substr(4)) - 1); };
+    auto taskNameToId = [](const string &s) { return stol(s.substr(4)) - 1; };
 #ifdef JSON_VERIFICATION
     NBT count{};
 #endif
