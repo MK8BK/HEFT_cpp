@@ -305,9 +305,6 @@ namespace HEFT_CPP {
         s = searchStart->start, e = searchStart->end;
         if (max(tmpEst, s)+tspc->W[task]<=e) {
           gapCache[processor] = {s, e};
-          //if (task==10080) {
-          //  cout << "10080 was scheduled on gap"  << Gap{s,e} << endl;
-          //}
           return max(tmpEst, s);
         }
         ++searchStart;
@@ -496,7 +493,7 @@ namespace HEFT_CPP {
       TDT s,e;
       while (searchStart!=gaps[processor].end()) {
         s = searchStart->start, e = searchStart->end;
-        if (tmpEst+tspc->W[task][processor]<=e) {
+        if (max(tmpEst,s)+tspc->W[task][processor]<=e) {
           gapCache[processor] = {s, e};
           return max(tmpEst, s);
         }
