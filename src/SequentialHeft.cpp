@@ -161,6 +161,10 @@ namespace HEFT_CPP {
     TaskSchedule(const NBT id, const TDT start, const TDT end):id(id), start(start), end(end){}
   };
 
+  ostream& operator<<(ostream& os, const TaskSchedule& tsc) {
+    return os << "tsc[" << tsc.id+1 << ',' << tsc.start << ','<<tsc.end << ']';
+  }
+
   bool operator<(const TaskSchedule& t1, const TaskSchedule& t2) {
     // assuming no intersections of schedules
     return t1.end<t2.end;
@@ -235,6 +239,10 @@ namespace HEFT_CPP {
     Gap(const TDT start, const TDT end):start(start), end(end){}
   };
 
+  ostream& operator<<(ostream& os, const Gap& gap) {
+    return os << "gap["<<gap.start<< ',' << gap.end << ']';
+  }
+
   bool operator<(const Gap& gap1, const Gap& gap2) {
     // assume that no intersections between gaps, ok in this problem
     return gap1.end<gap2.end;
@@ -295,8 +303,11 @@ namespace HEFT_CPP {
       TDT s,e;
       while (searchStart!=gaps[processor].end()) {
         s = searchStart->start, e = searchStart->end;
-        if (tmpEst+tspc->W[task]<=e) {
+        if (max(tmpEst, s)+tspc->W[task]<=e) {
           gapCache[processor] = {s, e};
+          //if (task==10080) {
+          //  cout << "10080 was scheduled on gap"  << Gap{s,e} << endl;
+          //}
           return max(tmpEst, s);
         }
         ++searchStart;
@@ -309,6 +320,14 @@ namespace HEFT_CPP {
     void updateGaps(vector<set<Gap>> &gaps, vector<Gap>& gapCache,
       const NBT processor, const TDT start, const TDT end,
                     const NBT task) {
+      //if (task==10078) {
+      //  if (gapCache[processor].start==-1) {
+      //    cout << "task 10078 was scheduled at the end\n" ;
+      //    cout << sch._processorSchedule[processor].size() << endl;
+      //  }else {
+      //    cout << "task 10078 was not scheduled at the end\n" ;
+      //  }
+      //}
       if (gapCache[processor].start==-1) {
         // was scheduled at the end
         auto lastTaskIt{sch._processorSchedule[processor].rbegin()};
@@ -320,6 +339,10 @@ namespace HEFT_CPP {
         }else {
           // add possible gap before
           const TDT prevEnd{lastTaskIt->end};
+          //if (task==10078) {
+          //  cout << "task 10078 is not the first task\n" ;
+          //  cout << "added prevGap " << Gap{prevEnd, start} << endl;
+          //}
           if (prevEnd<start)
             gaps[processor].insert({prevEnd, start});
         }
@@ -361,6 +384,7 @@ namespace HEFT_CPP {
       int numThreads{max(1, min(platformThreads - 1, 2))};
       task_thread_pool::task_thread_pool tp(numThreads);
 #endif
+      //int count{};
       for (NBT i{}; i < tspc->v; ++i) {
         const NBT task{uprankTaskNum[i].second};
         for (NBT processor = 0; processor < tspc->q; ++processor) {
@@ -378,6 +402,11 @@ namespace HEFT_CPP {
         bestEFT = *smallestEFT;
         bestProcessor = smallestEFT - EFT.begin();
         bestEST = EST[bestProcessor];
+        //if (task==10080 || task==10078) {
+        //  count++;
+        //  cout << task << "------------" << bestEST << ' ' << bestEFT << endl;
+        //  if (count==2) exit(EXIT_FAILURE);
+        //}
         sch.scheduleTask(task, bestProcessor, bestEST, bestEFT);
         updateGaps(gaps, gapCache, bestProcessor, bestEST, bestEFT, task);
       }
@@ -596,6 +625,23 @@ namespace HEFT_CPP {
   }
 
   bool checkSchedule(TaskSchedulingProblemConfig &tspc, Schedule &sc) {
+    TaskSchedule t1, t2;
+    // check non intersection of tasks on same processor
+    for (NBT processor{}; processor<tspc.q; ++processor) {
+      auto t1It{sc._processorSchedule[processor].begin()};
+      // no tasks
+      if(t1It==sc._processorSchedule[processor].end()) continue;
+      auto t2It{t1It};
+      ++t2It;
+      // only one task
+      if(t2It==sc._processorSchedule[processor].end()) continue;
+      while (t2It!=sc._processorSchedule[processor].end()) {
+        t1 = *t1It, t2 = *t2It;
+        if (t2.start<t1.end) return false;
+        ++t2It, ++t1It;
+      }
+    }
+    // check dependency constraints
     for (NBT task{}; task < sc.v; ++task) {
       auto [p, s, e] = sc.taskSchedule[task];
       for (NBT succ: tspc.successors[task]) {
@@ -607,7 +653,27 @@ namespace HEFT_CPP {
     return true;
   }
 
+
   bool checkHomogenousSchedule(HomogenousTaskSchedulingProblemConfig &tspc, Schedule &sc) {
+    TaskSchedule t1, t2;
+    for (NBT processor{}; processor<tspc.q; ++processor) {
+      auto t1It{sc._processorSchedule[processor].begin()};
+      // no tasks
+      if(t1It==sc._processorSchedule[processor].end()) continue;
+      auto t2It{t1It};
+      ++t2It;
+      // only one task
+      if(t2It==sc._processorSchedule[processor].end()) continue;
+      while (t2It!=sc._processorSchedule[processor].end()) {
+        t1 = *t1It, t2 = *t2It;
+        if (t2.start<t1.end) {
+          cout << t1 << ' ' << t2 << endl;
+          exit(EXIT_FAILURE);
+          return false;
+        }
+        ++t2It, ++t1It;
+      }
+    }
     for (NBT task{}; task < sc.v; ++task) {
       auto [p, s, e] = sc.taskSchedule[task];
       for (NBT succ: tspc.successors[task]) {
