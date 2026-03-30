@@ -43,11 +43,18 @@
 .idea
 .idea/
 .idea/*
+.vscode/
+.vscode/*
 
 gmon.out
 
 SequentialHeft
 test/task_graph_10000_1000_seed_80905.json
 test/benchmarks/*.json
+
+cpp_on_lambda/include
+cpp_on_lambda/bootstrap
+cpp_on_lambda/bootstrap.zip
+
 
 .clangd

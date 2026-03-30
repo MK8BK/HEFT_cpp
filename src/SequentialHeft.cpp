@@ -10,6 +10,8 @@
 #include <optional>
 #include <tuple>
 #include <rapidjson/document.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/stringbuffer.h>
 
 #define PARALLELIZED_FOR_PROCESSORS
 #undef PARALLELIZED_FOR_PROCESSORS
@@ -317,14 +319,6 @@ namespace HEFT_CPP {
     void updateGaps(vector<set<Gap>> &gaps, vector<Gap>& gapCache,
       const NBT processor, const TDT start, const TDT end,
                     const NBT task) {
-      //if (task==10078) {
-      //  if (gapCache[processor].start==-1) {
-      //    cout << "task 10078 was scheduled at the end\n" ;
-      //    cout << sch._processorSchedule[processor].size() << endl;
-      //  }else {
-      //    cout << "task 10078 was not scheduled at the end\n" ;
-      //  }
-      //}
       if (gapCache[processor].start==-1) {
         // was scheduled at the end
         auto lastTaskIt{sch._processorSchedule[processor].rbegin()};
@@ -336,10 +330,6 @@ namespace HEFT_CPP {
         }else {
           // add possible gap before
           const TDT prevEnd{lastTaskIt->end};
-          //if (task==10078) {
-          //  cout << "task 10078 is not the first task\n" ;
-          //  cout << "added prevGap " << Gap{prevEnd, start} << endl;
-          //}
           if (prevEnd<start)
             gaps[processor].insert({prevEnd, start});
         }
@@ -399,11 +389,6 @@ namespace HEFT_CPP {
         bestEFT = *smallestEFT;
         bestProcessor = smallestEFT - EFT.begin();
         bestEST = EST[bestProcessor];
-        //if (task==10080 || task==10078) {
-        //  count++;
-        //  cout << task << "------------" << bestEST << ' ' << bestEFT << endl;
-        //  if (count==2) exit(EXIT_FAILURE);
-        //}
         sch.scheduleTask(task, bestProcessor, bestEST, bestEFT);
         updateGaps(gaps, gapCache, bestProcessor, bestEST, bestEFT, task);
       }
@@ -747,7 +732,41 @@ namespace HEFT_CPP {
       tspc.data[task] = memories[task];
     return tspc;
   }
-} // namespace HEFT_CPP
+
+  void scheduleToString(const Schedule& sc, string& output) {
+    rapidjson::Document d;
+    d.SetObject();
+    NBT i{1};
+    for (auto [p, s, e] : sc.taskSchedule) {
+
+      rapidjson::Value taskSch(rapidjson::kObjectType);
+
+      rapidjson::Value processorNumber; processorNumber.SetInt(p);
+      rapidjson::Value processorNV; processorNV.SetString("processor");
+      taskSch.AddMember(processorNV, processorNumber, d.GetAllocator());
+
+      rapidjson::Value startNumber; startNumber.SetInt(s);
+      rapidjson::Value startNV; startNV.SetString("start");
+      taskSch.AddMember(startNV, startNumber, d.GetAllocator());
+
+      rapidjson::Value endNumber; endNumber.SetInt(e);
+      rapidjson::Value endNV; endNV.SetString("end");
+      taskSch.AddMember(endNV, endNumber, d.GetAllocator());
+
+      rapidjson::Value taskNameV; string taskName{"task"+to_string(i)};
+      taskNameV.SetString(taskName.data(), taskName.length(), d.GetAllocator());
+
+      d.AddMember(taskNameV, taskSch, d.GetAllocator());
+      ++i;
+    }
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buf);
+    d.Accept(writer);
+    string s(buf.GetString(), buf.GetSize());
+    output = std::move(s);
+    s = "";
+  }
+} // } // namespace HEFT_CPP
 
 void description_message() {
   cout << "Usage:\n";
@@ -785,6 +804,9 @@ int main(int argc, char *argv[]) {
     HomogenousHeftAlgorithm heft(&otspc.value());
     Schedule sch{heft.solve()};
     cout << sch << endl;
+    //string schString;
+    //scheduleToString(sch, schString);
+    //cout << schString << endl;
     for (int i{5}; i < argc; ++i) {
       if (strcmp(argv[i], "-schedule_verification") == 0) {
         if (checkHomogenousSchedule(otspc.value(), sch))
@@ -813,5 +835,8 @@ int main(int argc, char *argv[]) {
       cout << "Makespan is " << schedule.getMakeSpan() << '.' << endl;
     }
   }
+  //string schString;
+  //scheduleToString(schedule, schString);
+  //cout << schString << endl;
   return EXIT_SUCCESS;
 }

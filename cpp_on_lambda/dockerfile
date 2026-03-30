@@ -1,0 +1,27 @@
+FROM amazonlinux:2023
+
+#Install g++
+RUN yum update -y \
+    && yum install -y gcc gcc-c++ make zip git cmake cmake3 libcurl-devel \
+    && yum clean all \
+    && git clone https://github.com/awslabs/aws-lambda-cpp.git \
+    && cd aws-lambda-cpp \
+    && mkdir build && cd build \
+    && cmake3 .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=/usr/local \
+    && make \
+    && make install
+
+WORKDIR /var/task
+COPY main.cpp .
+COPY include/ ./include/
+
+#Compile in c++20
+RUN g++ -std=c++20 -O2 \
+  -o bootstrap main.cpp \
+  -L/usr/local/lib \
+  -laws-lambda-runtime \
+  -I include\
+  -Wall -Werror\
+  -lcurl
+
+CMD ["/var/task/bootstrap"]
