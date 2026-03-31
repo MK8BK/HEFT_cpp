@@ -3,7 +3,7 @@
 FUNCTION_NAME="$1"
 
 docker build -t cpp-lambda .
-docker run -it --rm -v $(pwd):/var/task/tmp cpp-lambda cp /var/task/bootstrap /var/task/tmp
+docker run -it --rm -v $(pwd):/var/task/tmp cpp-lambda cp /var/task/bootstrap /var/task/tmp 
 
 zip bootstrap.zip bootstrap
 

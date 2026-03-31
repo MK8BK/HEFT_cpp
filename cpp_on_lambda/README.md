@@ -10,7 +10,7 @@ Before getting started, make sure you have installed:
    - https://docs.docker.com/get-docker/
 
 - AWS CLI (configured with your credentials)
-    - https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+    - 	https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 
 ## II - Project Structure
 
