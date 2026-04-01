@@ -66,3 +66,7 @@ test/jsonianAdaptor*
 test/DagGenerator.cpp
 
 .clangd
+
+test/output_moncef_jsonian_correct.7z
+test/output_moncef_jsonian_correct.json
+
