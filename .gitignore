@@ -61,5 +61,8 @@ test/task_graph_80000_5_seed_10565.json
 
 xxlargeComplex.json
 
+output_moncef_jsonian.json
+test/jsonianAdaptor*
+test/DagGenerator.cpp
 
 .clangd

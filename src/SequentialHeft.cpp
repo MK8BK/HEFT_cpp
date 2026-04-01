@@ -712,6 +712,12 @@ namespace HEFT_CPP {
       }
 #endif
       task = taskNameToId(taskV["id"].GetString());
+#ifdef JSON_VERIFICATION
+      if (task>=taskCount) {
+        cerr << "[Tasks should be numbered from 0 to v-1 where v is the total number of tasks]\n"
+        return nullopt;
+
+#endif
       memories[task] = taskV["memory"].GetInt64();
       duration = taskV["duration"].GetInt64();
       tspc.W[task] = duration;
@@ -770,16 +776,16 @@ namespace HEFT_CPP {
 
 void description_message() {
   cout << "Usage:\n";
-  cout << "  -p <processor_count> -f <json_file_path> [-schedule_verification] [-compute_makespan]\n\n";
-  cout << "   or interactively redirect .txt file using the following format\n";
   cout <<
-      "      - two integers representing the number of tasks and the number of processors\n"
-      "      - v lines are read, each one starts with the number of task successors\n"
-      "      then the ids of said successors\n"
-      "      - then vxv matrix data is read, the data transfer sizes between tasks\n"
-      "      - then qxq matrix B is read, the data transfer rate between processors\n"
-      "      - then vxq matrix W is read, the execution time of tasks on processors\n"
-      "      - then q number form the vector L, the communication startup costs of processors\n";
+  "  -p <processor_count> -f <json_file_path> [-schedule_verification] [-compute_makespan]\n\n"
+  "   or interactively redirect .txt file using the following format\n"
+  "      - two integers representing the number of tasks and the number of processors\n"
+  "      - v lines are read, each one starts with the number of task successors\n"
+  "      then the ids of said successors\n"
+  "      - then vxv matrix data is read, the data transfer sizes between tasks\n"
+  "      - then qxq matrix B is read, the data transfer rate between processors\n"
+  "      - then vxq matrix W is read, the execution time of tasks on processors\n"
+  "      - then q number form the vector L, the communication startup costs of processors\n";
 }
 
 int main(int argc, char *argv[]) {
