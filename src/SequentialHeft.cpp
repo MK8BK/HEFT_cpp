@@ -17,6 +17,7 @@
 #undef PARALLELIZED_FOR_PROCESSORS
 
 #ifdef PARALLELIZED_FOR_PROCESSORS
+#define THREAD_COUNT 2
 #include <task_thread_pool.hpp>
 #endif
 
@@ -363,12 +364,13 @@ namespace HEFT_CPP {
       vector<set<Gap> > gaps(tspc->q);
       vector<Gap> gapCache(tspc->q);
 #ifdef PARALLELIZED_FOR_PROCESSORS
-      auto thCompute = [this](const NBT task, const NBT processor, vector<TDT> &EST, vector<TDT> &EFT) {
-        EST[processor] = computeEST(task, processor);
+      auto thCompute = [this, &gaps, &gapCache](const NBT task, const NBT processor, vector<TDT> &EST, vector<TDT> &EFT) {
+        EST[processor] = computeEST(task, processor, gaps, gapCache);
         EFT[processor] = EST[processor] + tspc->W[task];
       };
-      const int platformThreads{static_cast<int>(thread::hardware_concurrency())};
-      int numThreads{max(1, min(platformThreads - 1, 2))};
+      //const int platformThreads{static_cast<int>(thread::hardware_concurrency())};
+      //int numThreads{max(1, min(platformThreads - 1, 2))};
+      int numThreads{THREAD_COUNT};
       task_thread_pool::task_thread_pool tp(numThreads);
 #endif
       //int count{};
@@ -536,12 +538,13 @@ namespace HEFT_CPP {
       vector<set<Gap> > gaps(tspc->q);
       vector<Gap> gapCache(tspc->q);
 #ifdef PARALLELIZED_FOR_PROCESSORS
-      auto thCompute = [this](const NBT task, const NBT processor, vector<TDT> &EST, vector<TDT> &EFT) {
-        EST[processor] = computeEST(task, processor);
-        EFT[processor] = EST[processor] + tspc->W[task];
+      auto thCompute = [this, &gaps, &gapCache](const NBT task, const NBT processor, vector<TDT> &EST, vector<TDT> &EFT) {
+        EST[processor] = computeEST(task, processor, gaps, gapCache);
+        EFT[processor] = EST[processor] + tspc->W[task][processor];
       };
-      const int platformThreads{static_cast<int>(thread::hardware_concurrency())};
-      int numThreads{max(1, min(platformThreads - 1, 2))};
+      //const int platformThreads{static_cast<int>(thread::hardware_concurrency())};
+      //int numThreads{max(1, min(platformThreads - 1, 2))};
+      int numThreads{THREAD_COUNT};
       task_thread_pool::task_thread_pool tp(numThreads);
 #endif
       for (NBT i{}; i < tspc->v; ++i) {
